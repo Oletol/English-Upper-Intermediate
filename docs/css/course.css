@@ -2,7 +2,7 @@
    English Upper-Intermediate — styles (layout of the course workbook, palette of «Чердак»)
    Student edition: Cherdak navy + accent blue.  Teacher edition (body.teacher): Cherdak violet.
    ===================================================================== */
-@import url("fonts.css");
+@import url("fonts.css?v=20261015b");
 /* Palette and type: «Чердак» (Cherdak). Variable names kept from the template:
    --gold* = Cherdak accent blue, --plum* = Cherdak violet (Teacher's Edition). */
 :root{
@@ -455,3 +455,15 @@ h1,h2,h3,h4,h5{text-wrap:balance}
 .gapped b.l{display:inline-block;width:22px;color:var(--gold)}
 .rtext .gnum{font-family:var(--sans);font-weight:800;color:var(--gold);font-size:14px}
 .rtext .lead{text-align:center;font-size:16px;margin:0 0 18px}
+/* text with gaps inside (forum posts etc.) */
+.inline-text{padding:6px 18px 18px}
+.inline-text .post{box-shadow:none}
+.inline-text p{line-height:2.1}
+.inline-text .gn{display:inline-block;font-family:var(--mono);font-size:11px;font-weight:700;color:var(--gold);margin:0 3px 0 2px;vertical-align:1px}
+.inline-text select.gap{font-family:var(--sans);font-size:14.5px;font-weight:600;color:var(--navy);padding:2px 6px}
+.inline-text .corr{font-size:13px;margin-left:4px}
+.inline-text .keyhint{margin-left:4px}
+select.gap{cursor:pointer}
+ol.items select.gap{margin:0 3px}
+.keyhint.model{display:block;margin:6px 0 4px;padding:6px 10px;line-height:1.5;font-weight:400;color:var(--ink2);background:#eff8f2}
+.keyhint.model b{color:var(--ok)}

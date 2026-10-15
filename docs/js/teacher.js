@@ -4,14 +4,14 @@ import {
   auth, db, onAuthStateChanged, signInWithEmailAndPassword, sendPasswordResetEmail, signOut,
   doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, onSnapshot, collection, query, where, orderBy,
   writeBatch, arrayUnion, arrayRemove, serverTimestamp,
-} from "./fb.js";
-import { COURSE_TITLE } from "./firebase-config.js";
+} from "./fb.js?v=20261015b";
+import { COURSE_TITLE } from "./firebase-config.js?v=20261015b";
 import {
   esc, renderBlocks, renderExercise, exercisesOf, isAuto, gradeAuto, buildResult, keyText, norm,
   fmtTime, friendlyError, authFormHTML, wireAuthForm, subId, KIND_LABEL, isTeacherChecked, gradeExercise, wireFlashcards, isManual,
-} from "./common.js";
-import { initShell, renderUnitNav, wireUnitNav } from "./shell.js";
-import { loadVocab, grammarCheck, vocabProfile, unitVocabulary, feedbackHTML, sleep } from "./writing.js";
+} from "./common.js?v=20261015b";
+import { initShell, renderUnitNav, wireUnitNav } from "./shell.js?v=20261015b";
+import { loadVocab, grammarCheck, vocabProfile, unitVocabulary, feedbackHTML, sleep } from "./writing.js?v=20261015b";
 
 const $ = (s) => document.querySelector(s);
 const ls = {
@@ -650,6 +650,7 @@ function stripExercise(b, seen, where) {
       if (answer === undefined || answer === "") throw new Error(`Exercise ${b.id}, item ${it.id}: no answer`);
       keys[rest.id] = answer;
     }
+    else if (b.kind === "open" && answer) keys[rest.id] = answer;   // model answer, teacher only
     return rest;
   });
   return { ex: { ...b, type: "exercise", items }, keys };

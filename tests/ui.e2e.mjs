@@ -12,7 +12,7 @@ const course = readFileSync(new URL("../content-private/test-fixture.json", impo
 
 const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium-1194/chrome-linux/chrome" }).catch(() => chromium.launch());
 const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
-await ctx.route("**/js/fb.js", (r) => r.fulfill({ contentType: "text/javascript", body: mock }));
+await ctx.route("**/js/fb.js*", (r) => r.fulfill({ contentType: "text/javascript", body: mock }));
 // LanguageTool: подставной ответ (в песочнице нет доступа к api.languagetool.org)
 let ltCalls = 0;
 await ctx.route("https://api.languagetool.org/**", async (r) => {

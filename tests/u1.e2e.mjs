@@ -11,8 +11,15 @@ const mock = readFileSync(new URL("./mock-fb.js", import.meta.url), "utf8");
 const course = readFileSync(new URL("../content-private/course.json", import.meta.url), "utf8");
 const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium-1194/chrome-linux/chrome" }).catch(() => chromium.launch());
 const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
-await ctx.route("**/js/fb.js", (r) => r.fulfill({ contentType: "text/javascript", body: mock }));
+await ctx.route("**/js/fb.js*", (r) => r.fulfill({ contentType: "text/javascript", body: mock }));
 const errors = [];
+await ctx.route("https://api.languagetool.org/**", async (r) => {
+  const text = new URLSearchParams(r.request().postData()).get("text") || "";
+  const i = text.indexOf("has went");
+  const matches = i < 0 ? [] : [{ offset: i, length: 8, message: "The past participle of 'go' is 'gone'.", shortMessage: "Wrong verb form",
+    replacements: [{ value: "has gone" }], rule: { issueType: "grammar", category: { name: "Grammar" } } }];
+  await r.fulfill({ contentType: "application/json", headers: { "Access-Control-Allow-Origin": "*" }, body: JSON.stringify({ matches }) });
+});
 const page = async (url) => { const p = await ctx.newPage(); p.on("pageerror", (e) => errors.push(url + ": " + e.message)); p.on("dialog", (d) => d.accept()); await p.goto(BASE + url); return p; };
 const sel = (ex, it) => `[data-ex="${ex}"][data-item="${it}"]`;
 const step = (t) => console.log("•", t);
@@ -73,7 +80,8 @@ step("Warm-up answers");
 await s.fill(sel("w2", "1"), "biology");
 await s.fill(sel("w2", "2"), "Computer science");
 await s.fill(sel("w2", "3"), "Music");
-for (const [i, v] of [["1", "A"], ["2", "A"], ["3", "B"], ["4", "B"], ["5", "A"], ["6", "B"]]) await s.check(`${sel("w4", i)}[value=${v}]`);
+for (const [i, v] of [["1", "state"], ["2", "primary"], ["3", "public"], ["4", "private"], ["5", "nursery"], ["6", "sixth form"]]) await s.selectOption(sel("w4", i), v);
+await s.selectOption(sel("w3", "6"), "point");
 await s.fill(sel("w9", "7"), "IB");
 await s.fill(sel("w9", "10"), "22");
 const fc = s.locator(".fc").first();
@@ -92,22 +100,25 @@ await s.locator("#save-state", { hasText: /Saved|saved/ }).waitFor({ timeout: 50
 step("Teacher checks w2, w4, w9");
 await t.click('.sb-uh[data-unit="u1"]').catch(() => {});
 await t.click('.sb-item:has-text("Warm-up")');
-for (const ex of ["w2", "w4", "w9"]) { await t.waitForSelector(`[data-act="check-ex"][data-ex="${ex}"]`); await t.click(`[data-act="check-ex"][data-ex="${ex}"]`); }
+for (const ex of ["w2", "w3", "w4", "w9"]) { await t.waitForSelector(`[data-act="check-ex"][data-ex="${ex}"]`); await t.click(`[data-act="check-ex"][data-ex="${ex}"]`); }
 await s.waitForSelector("#ex-w9 .ex-score", { timeout: 5000 });
 assert.equal((await s.textContent("#ex-w2 .ex-score")).trim(), "2 / 3");
 assert.equal((await s.textContent("#ex-w4 .ex-score")).trim(), "5 / 6");
 assert.equal((await s.textContent("#ex-w9 .ex-score")).trim(), "2 / 11");
+assert.equal((await s.textContent("#ex-w3 .ex-score")).trim(), "1 / 9");
 await s.locator("#ex-w4").screenshot({ path: `${SHOTS}/07-w4-checked.png` });
 
 step("Reading");
 await s.click('.sb-item:has-text("Reading")');
 await s.waitForSelector("#ex-r4");
-for (const [i, v] of [["1", "e"], ["2", "G"], ["3", "A"], ["4", "F"], ["5", "C"], ["6", "H"], ["7", "B"]]) await s.fill(sel("r4", i), v);
+for (const [i, v] of [["1", "E"], ["2", "G"], ["3", "A"], ["4", "F"], ["5", "C"], ["6", "H"], ["7", "B"]]) await s.selectOption(sel("r4", i), v);
 await s.fill(sel("r8", "4"), "low income");
 await s.fill(sel("r11", "5"), "competitor");
 await s.fill(sel("r11", "9"), "excellance");
 await s.fill(sel("r12", "5"), "catch a glimpse of");
-await s.check(`${sel("r10", "1")}[value=B]`);
+await s.selectOption(sel("r10", "1"), "false friend");
+await s.selectOption(sel("r10b", "1"), "a");
+await s.fill(sel("r13", "1"), "Hi Helen, my school has went to an island. We study marine science and take the ferry every day. " + "It is a great hands-on learning experience. ".repeat(20));
 await s.locator(".rtext").scrollIntoViewIfNeeded();
 await s.screenshot({ path: `${SHOTS}/08-reading-text.png` });
 await s.locator(".gapped").screenshot({ path: `${SHOTS}/09-gapped.png` });
@@ -117,14 +128,21 @@ assert.ok(!/[←→⤴«»▼›▶]/.test(studentText), "no arrows");
 assert.ok(!studentText.includes("Key:"), "no keys in student view");
 
 await t.click('.sb-item:has-text("Reading")');
-for (const ex of ["r4", "r8", "r10", "r11", "r12"]) { await t.waitForSelector(`[data-act="check-ex"][data-ex="${ex}"]`); await t.click(`[data-act="check-ex"][data-ex="${ex}"]`); }
+for (const ex of ["r4", "r8", "r10", "r10b", "r11", "r12"]) { await t.waitForSelector(`[data-act="check-ex"][data-ex="${ex}"]`); await t.click(`[data-act="check-ex"][data-ex="${ex}"]`); }
 await s.waitForSelector("#ex-r12 .ex-score", { timeout: 5000 });
 assert.equal((await s.textContent("#ex-r4 .ex-score")).trim(), "6 / 7");
 assert.equal((await s.textContent("#ex-r8 .ex-score")).trim(), "1 / 5");
 assert.equal((await s.textContent("#ex-r10 .ex-score")).trim(), "1 / 8");
+assert.equal((await s.textContent("#ex-r10b .ex-score")).trim(), "1 / 4");
 assert.equal((await s.textContent("#ex-r11 .ex-score")).trim(), "1 / 10");
 assert.equal((await s.textContent("#ex-r12 .ex-score")).trim(), "1 / 7");
 await s.locator("#ex-r4").screenshot({ path: `${SHOTS}/10-r4-checked.png` });
+step("Writing check of the email (LanguageTool mocked)");
+assert.ok(await t.locator("#ex-r6 .keyhint.model").count() >= 5, "model answers for the teacher");
+await t.click('[data-act="check-writing"][data-ex="r13"]');
+await s.waitForSelector("#ex-r13 .wfb", { timeout: 15000 });
+assert.ok((await s.textContent("#ex-r13 .wfb")).includes("has gone"), "grammar feedback shown");
+await s.locator("#ex-r13").screenshot({ path: `${SHOTS}/13-email-feedback.png` });
 await t.screenshot({ path: `${SHOTS}/11-teacher-reading.png` });
 
 step("Mobile");

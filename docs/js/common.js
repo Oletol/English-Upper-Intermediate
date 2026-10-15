@@ -183,6 +183,7 @@ export function renderExercise(ex, o = {}) {
   const options = ex.kind === "match" && ex.showOptionList !== false
     ? `<div class="opt-list">${(ex.options || []).map((op) => `<b>${esc(op.id)}</b>&nbsp;${op.text}`).join(" &nbsp;&middot;&nbsp; ")}</div>` : "";
 
+  const inlineCtl = {};
   const items = (ex.items || []).map((it) => {
     const val = a[it.id] ?? "";
     const r = o.auto?.[it.id];
@@ -195,8 +196,12 @@ export function renderExercise(ex, o = {}) {
 
     if (ex.kind === "gap") {
       const size = it.size || ex.size || 14;
-      const input = `<input class="gap ${ex.box ? "box" : ""} ${mark}" ${attrs} value="${esc(val)}" size="${size}" ${ex.box ? `style="width:${size + 1}ch"` : ""} ${NOAUTO}>`;
-      body = it.text.includes("___") ? it.text.replace("___", input) : `<span class="li-t">${it.text}</span>${input}`;
+      // "choices": the word is chosen from a dropdown list instead of being typed
+      const input = it.choices
+        ? `<select class="gap ${mark}" ${attrs}><option value="">choose…</option>${it.choices.map((c) => `<option value="${esc(c)}" ${val === c ? "selected" : ""}>${esc(c)}</option>`).join("")}</select>`
+        : `<input class="gap ${ex.box ? "box" : ""} ${mark}" ${attrs} value="${esc(val)}" size="${size}" ${ex.box ? `style="width:${size + 1}ch"` : ""} ${NOAUTO}>`;
+      if (ex.inline) { inlineCtl[it.id] = `<span class="gn">${esc(it.id)}</span>${input}${corr}${keyHint}`; return ""; }
+      body = (it.text || "").includes("___") ? it.text.replace("___", input) : `<span class="li-t">${it.text || ""}</span>${input}`;
       body += corr + keyHint;
     } else if (ex.kind === "match") {
       const opts = (ex.options || []).map((op) =>
@@ -227,13 +232,16 @@ export function renderExercise(ex, o = {}) {
       }
       const minW = it.minWords || ex.minWords;
       const wc = minW ? `<div class="wc"><span class="wc-n" data-wc="${esc(ex.id)}:${esc(it.id)}">${countWords(val)}</span> words <span class="muted">· at least ${minW}</span></div>` : "";
-      body = `${it.text}<textarea class="open-answer" rows="${it.rows || 5}" ${attrs} ${NOAUTO} placeholder="${o.readOnly ? "" : "Type your answer here…"}">${esc(val)}</textarea>${wc}${o.itemExtra ? o.itemExtra(it.id) : ""}${grade}`;
+      const model = o.key && o.key[it.id] ? `<div class="keyhint model"><b>Model answer:</b> ${esc(keyText(o.key[it.id]))}</div>` : "";
+      body = `${it.text}${model}<textarea class="open-answer" rows="${it.rows || 5}" ${attrs} ${NOAUTO} placeholder="${o.readOnly ? "" : "Type your answer here…"}">${esc(val)}</textarea>${wc}${o.itemExtra ? o.itemExtra(it.id) : ""}${grade}`;
     }
     return `<li${play ? ' class="has-play"' : ""}>${play}${play ? `<div class="li-body">${body}</div>` : body}</li>`;
   }).join("\n");
 
   const count = (ex.items || []).length;
   let body = `<ol class="items ${ex.layout === "two" ? "two" : ""} ${ex.wide ? "wide" : ""} ${ex.quotes ? "quotes" : ""}">${items}</ol>`;
+  // "inline": a whole text (html) with {{itemId}} where each gap goes
+  if (ex.inline) body = `<div class="inline-text">${ex.inline.replace(/\{\{([\w-]+)\}\}/g, (m, id) => inlineCtl[id] ?? m)}</div>`;
   if (ex.kind === "match" && ex.display === "letters") {
     // as in the printed workbook: type the letter next to each phrase, meanings listed on the right
     const left = (ex.items || []).map((it) => {
