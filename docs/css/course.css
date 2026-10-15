@@ -433,3 +433,25 @@ body.teacher .auth-wrap{background:radial-gradient(120% 140% at 50% 0%,#4a3480 0
 .auth-card{border-radius:20px}
 h1,h2,h3,h4,h5{text-wrap:balance}
 :focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+
+/* transcription on flashcards */
+.fc-front .ipa{font-family:var(--serif);font-size:16px;color:rgba(255,255,255,.78);letter-spacing:.01em}
+.fc-back .ipa{font-family:var(--serif);font-size:14.5px;color:var(--mut);margin-top:-6px}
+.fc-h .ic:empty{display:none}
+/* picture not uploaded yet */
+.pic.missing img{display:none}
+.pic.missing::before{content:"Picture: " attr(data-file);display:flex;align-items:center;justify-content:center;min-height:180px;padding:16px;
+ background:repeating-linear-gradient(45deg,var(--bg),var(--bg) 10px,var(--bg2) 10px,var(--bg2) 20px);color:var(--mut);font-size:13px;font-family:var(--mono)}
+/* forum posts */
+.post{border:1px solid var(--line);border-radius:var(--r);background:#fff;padding:14px 18px;margin:12px 0;box-shadow:var(--sh2)}
+.post-h{display:flex;align-items:center;gap:10px;margin-bottom:8px;font-size:13px;color:var(--mut)}
+.post-h b{color:var(--navy);font-size:14.5px}
+.post-av{width:32px;height:32px;border-radius:50%;background:var(--gold3);color:var(--gold);display:grid;place-items:center;font-weight:800;font-size:14px;flex:none}
+.post p{margin:0;font-size:15.5px;line-height:1.75}
+.post .ch{font-weight:700;color:var(--navy);white-space:nowrap}
+.gapped{border:1px solid var(--line);border-radius:var(--r);background:#fbfcfe;padding:12px 18px;margin:14px 0}
+.gapped p{margin:0 0 7px;font-size:15px}
+.gapped p:last-child{margin:0}
+.gapped b.l{display:inline-block;width:22px;color:var(--gold)}
+.rtext .gnum{font-family:var(--sans);font-weight:800;color:var(--gold);font-size:14px}
+.rtext .lead{text-align:center;font-size:16px;margin:0 0 18px}

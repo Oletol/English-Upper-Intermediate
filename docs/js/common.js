@@ -362,7 +362,7 @@ export function renderFlashcards(b, num = "") {
   const data = esc(JSON.stringify(cards));
   const style = b.style === "discussion" ? "discussion" : "words";
   return `<section class="fc ${style === "discussion" ? "fc-disc" : ""}" data-cards="${data}" data-i="0" data-style="${style}">
-    <div class="fc-h">${num ? `<span class="ex-n">${esc(num)}</span>` : `<span class="ic">🃏</span>`}<span class="ex-t">${esc(b.title || "Flashcards")}</span></div>
+    <div class="fc-h">${num ? `<span class="ex-n">${esc(num)}</span>` : `<span class="ic"></span>`}<span class="ex-t">${esc(b.title || "Flashcards")}</span></div>
     ${b.rubric ? `<p class="ex-i">${b.rubric}</p>` : ""}
     <div class="fc-stage">${fcCard(cards[0], 0, cards.length, style)}</div>
     <div class="fc-nav">
@@ -381,8 +381,8 @@ function fcCard(c, i, n, style) {
     <span class="fc-face fc-front"><span class="lbl">Card ${i + 1}</span><span class="q">${esc(c.front)}</span></span></div>`;
   return `<button type="button" class="fc-card" data-fc="flip" aria-label="Turn the card over">
     <span class="fc-inner">
-      <span class="fc-face fc-front"><span class="w">${esc(c.front)}</span><span class="hint">Click to see the translation</span></span>
-      <span class="fc-face fc-back"><span class="w2">${esc(c.front)}</span><span class="tr">${esc(c.back)}</span>${c.example ? `<span class="eg">${esc(c.example)}</span>` : ""}</span>
+      <span class="fc-face fc-front"><span class="w">${esc(c.front)}</span>${c.ipa ? `<span class="ipa">${esc(c.ipa)}</span>` : ""}<span class="hint">Click to see the translation</span></span>
+      <span class="fc-face fc-back"><span class="w2">${esc(c.front)}</span>${c.ipa ? `<span class="ipa">${esc(c.ipa)}</span>` : ""}<span class="tr">${esc(c.back)}</span>${c.example ? `<span class="eg">${esc(c.example)}</span>` : ""}</span>
     </span></button>`;
 }
 let fcWired = false;
@@ -426,14 +426,14 @@ export function wireFlashcards(root = document) {
 // ---------------------------------------------------------------------
 const mediaSrc = (src) => esc(String(src || "").replace(/^\/+/, ""));
 function renderImages(items, layout) {
-  const figs = items.map((it) => `<figure class="pic">
-      <img src="${mediaSrc(it.src)}" alt="${esc(it.alt || it.caption || "")}" loading="lazy" draggable="false">
+  const figs = items.map((it) => `<figure class="pic" data-file="${esc(String(it.src || "").split("/").pop())}">
+      <img src="${mediaSrc(it.src)}" alt="${esc(it.alt || it.caption || "")}" loading="lazy" draggable="false" onerror="this.parentNode.classList.add('missing')">
       ${it.caption || it.label ? `<figcaption class="cap">${it.label ? `<b>${esc(it.label)}</b>` : ""}${it.caption ? esc(it.caption) : ""}</figcaption>` : ""}
     </figure>`).join("");
   return `<div class="pics ${items.length > 1 ? (layout === "row" ? "row" : "grid") : "one"}">${figs}</div>`;
 }
 function renderAudio(b) {
-  return `<div class="audio"><div class="au-ic">🎧</div><div class="au-b">
+  return `<div class="audio"><div class="au-ic"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 15v-3a8 8 0 0 1 16 0v3"/><rect x="3" y="14" width="4" height="6" rx="1.5"/><rect x="17" y="14" width="4" height="6" rx="1.5"/></svg></div><div class="au-b">
       <div class="au-t">${esc(b.title || "Listen")}</div>
       <audio controls preload="none" controlslist="nodownload noplaybackrate" src="${mediaSrc(b.src)}"></audio>
       ${b.note ? `<div class="au-n">${esc(b.note)}</div>` : ""}
