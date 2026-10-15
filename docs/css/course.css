@@ -2,7 +2,7 @@
    English Upper-Intermediate — styles (layout of the course workbook, palette of «Чердак»)
    Student edition: Cherdak navy + accent blue.  Teacher edition (body.teacher): Cherdak violet.
    ===================================================================== */
-@import url("fonts.css?v=20261015b");
+@import url("fonts.css?v=20261015c");
 /* Palette and type: «Чердак» (Cherdak). Variable names kept from the template:
    --gold* = Cherdak accent blue, --plum* = Cherdak violet (Teacher's Edition). */
 :root{
