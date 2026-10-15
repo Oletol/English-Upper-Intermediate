@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="t">
+  <title id="t">Cherdak</title>
+  <defs><radialGradient id="bg" cx="50%" cy="45%" r="70%"><stop offset="0" stop-color="#27477A"/><stop offset="1" stop-color="#14284A"/></radialGradient></defs>
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <g fill="none" stroke="#fff" stroke-width="26" stroke-linecap="round" stroke-linejoin="round" transform="translate(256 262) scale(0.4) translate(-597 -540)">
+    <path d="M150 432 L597 138 L1044 432"/>
+    <path d="M232 380 V918 a26 26 0 0 0 26 26 H934 a26 26 0 0 0 26 -26 V380"/>
+    <path d="M246 470 q20 -8 30 -30 q18 -45 50 -45 H492 q22 0 34 22 l18 32 q12 22 34 22 H932 q14 0 14 14"/>
+    <path d="M276 905 H915"/>
+    <path d="M484 585 L690 656 L640 690 L710 770 L675 805 L605 728 L556 792 Z"/>
+  </g>
+</svg>
