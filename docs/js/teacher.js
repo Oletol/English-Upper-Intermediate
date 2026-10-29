@@ -3,15 +3,18 @@
 import {
   auth, db, onAuthStateChanged, signInWithEmailAndPassword, sendPasswordResetEmail, signOut,
   doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, onSnapshot, collection, query, where, orderBy,
-  writeBatch, arrayUnion, arrayRemove, serverTimestamp,
-} from "./fb.js?v=20261015c";
-import { COURSE_TITLE } from "./firebase-config.js?v=20261015c";
+  writeBatch, arrayUnion, arrayRemove, serverTimestamp, deleteField,
+} from "./fb.js?v=20261029a";
+import { COURSE_TITLE } from "./firebase-config.js?v=20261029a";
 import {
   esc, renderBlocks, renderExercise, exercisesOf, isAuto, gradeAuto, buildResult, keyText, norm,
-  fmtTime, friendlyError, authFormHTML, wireAuthForm, subId, KIND_LABEL, isTeacherChecked, gradeExercise, wireFlashcards, isManual,
-} from "./common.js?v=20261015c";
-import { initShell, renderUnitNav, wireUnitNav } from "./shell.js?v=20261015c";
-import { loadVocab, grammarCheck, vocabProfile, unitVocabulary, feedbackHTML, sleep } from "./writing.js?v=20261015c";
+  fmtTime, friendlyError, authFormHTML, wireAuthForm, subId, KIND_LABEL, isTeacherChecked, hasPick, exNum, gradeExercise, readInput, wireFlashcards, isManual, unitNo, unitLabel, wireLang,
+  isCorrect, doneMap, isTranslation, exerciseNumbers, fmtDate, todayISO, answerLabel, r2,
+} from "./common.js?v=20261029a";
+import "./speaking.js?v=20261029a";
+import { initShell, renderUnitNav, wireUnitNav } from "./shell.js?v=20261029a";
+import { loadVocab, grammarCheck, vocabProfile, unitVocabulary, targetCheck, feedbackHTML, sleep } from "./writing.js?v=20261029a";
+import { focusCheck } from "./grammar-focus.js?v=20261029a";
 
 const $ = (s) => document.querySelector(s);
 const ls = {
@@ -29,13 +32,20 @@ const T = {
   showCorrect: ls.get("showCorrect", "1") === "1",
   tests: [], testsLoaded: false, testSel: null, attempts: [], testRes: {}, testContent: {},
   unsub: [], ctxUnsub: [],
+  practice: {},          // unitId -> {exId: {itemId: value}}: what the teacher types in the unit (kept in this tab only)
+  mistOpen: new Set(),   // exercises whose list of students' mistakes is open
+  journal: undefined,    // attendance of the current group: {lessons: {"2026-10-21": {absent: [uid]}}}
+  unitViewKey: "",
 };
+// An absent student gets this share of the points for the in-class exercises of that lesson
+const ABSENT_FACTOR = 0.25;
 
 const TOOLS = [
   { id: "access", icon: "🔓", title: "Access & results", sub: "Open units, release results" },
   { id: "works", icon: "📝", title: "Student work", sub: "Answers, open-answer marking" },
   { id: "tests", icon: "⏱", title: "Tests", sub: "Timed tests: open, watch, check" },
   { id: "stats", icon: "📊", title: "Analytics", sub: "Difficult questions, heat map" },
+  { id: "journal", icon: "📅", title: "Attendance", sub: "Lesson dates, present and absent" },
   { id: "groups", icon: "👥", title: "Groups & students", sub: "Group codes, moving and removing students" },
   { id: "content", icon: "📦", title: "Course content", sub: "Import units and keys" },
 ];
@@ -44,6 +54,7 @@ document.title = `Teacher's Edition · ${COURSE_TITLE}`;
 document.querySelectorAll("[data-course-title]").forEach((el) => (el.textContent = COURSE_TITLE));
 initShell();
 wireFlashcards();
+wireLang();
 wireUnitNav($("#unit-nav"), () => renderNav());
 
 function toast(t, ms = 3500) {
@@ -94,7 +105,7 @@ onAuthStateChanged(auth, async (user) => {
 // ------------------------------------------------------------------ context: group + unit
 function fillCtx() {
   $("#ctx-group").innerHTML = T.groups.map((g) => `<option value="${esc(g.id)}" ${g.id === T.gid ? "selected" : ""}>${esc(g.name || g.id)}</option>`).join("") || `<option value="">no groups yet</option>`;
-  $("#ctx-unit").innerHTML = T.units.map((u, i) => `<option value="${esc(u.id)}" ${u.id === T.unitId ? "selected" : ""}>Unit ${u.order || i + 1}</option>`).join("") || `<option value="">no units yet</option>`;
+  $("#ctx-unit").innerHTML = T.units.map((u, i) => `<option value="${esc(u.id)}" ${u.id === T.unitId ? "selected" : ""}>${esc(unitLabel(u, i))}</option>`).join("") || `<option value="">no units yet</option>`;
 }
 $("#ctx-group").addEventListener("change", (e) => { T.gid = e.target.value; ls.set("gid", T.gid); T.selected = null; subscribeCtx(); render(); });
 $("#ctx-unit").addEventListener("change", (e) => setUnit(e.target.value));
@@ -118,6 +129,13 @@ function subscribeCtx() {
     T.students = snap.docs.map((d) => ({ uid: d.id, ...d.data() })).sort((a, b) => a.name.localeCompare(b.name));
     render();
   }));
+  // attendance journal: kept in a teacher-only document (answerKeys/journal~<group>), students never receive it
+  T.journal = undefined;
+  T.ctxUnsub.push(onSnapshot(journalRef(T.gid), (snap) => {
+    T.journal = snap.exists() ? snap.data() : { lessons: {} };
+    T.journal.lessons ??= {};
+    render();
+  }, () => { T.journal = { lessons: {}, error: true }; render(); }));
   if (!T.unitId) return;
   loadUnitData(T.unitId).then(render);
   T.ctxUnsub.push(onSnapshot(query(collection(db, "submissions"), where("groupId", "==", T.gid), where("unitId", "==", T.unitId)), (snap) => {
@@ -162,7 +180,8 @@ window.addEventListener("hashchange", () => {
 
 const group = () => T.groups.find((g) => g.id === T.gid);
 const unit = () => T.units.find((u) => u.id === T.unitId);
-const unitNum = (u) => u.order || T.units.indexOf(u) + 1;
+const unitNum = (u) => unitNo(u, T.units.indexOf(u));
+const uLabel = (u) => unitLabel(u, T.units.indexOf(u));
 
 function renderNav() {
   const r = route();
@@ -186,16 +205,21 @@ function renderNav() {
 function render(force = false) {
   if (!T.user || $("#app").hidden) return;
   renderNav();
+  const r = route();
+  // A unit page that is already on the screen is not drawn again when students type:
+  // only the live statistics are refreshed. The teacher's own answers, an audio file that is playing,
+  // a flashcard or a recorder stay as they are.
+  if (!force && r.unit && r.unit === T.unitId && T.unitViewKey && T.unitViewKey === unitViewKey(r)) { patchUnitStats(); return; }
   // do not re-render while the teacher is typing a mark, comment or JSON
   const a = document.activeElement;
-  if (!force && a && $("#view").contains(a) && a.matches(".g-score,.g-comment,textarea.json,input[type=text],input:not([type])")) return;
-  const r = route();
+  if (!force && a && $("#view").contains(a) && a.matches(".g-score,.g-comment,textarea.json,input[type=text],input:not([type]),textarea.open-answer,[data-item],input[type=date]")) return;
   if (r.unit && r.unit !== T.unitId && T.units.some((u) => u.id === r.unit)) { setUnit(r.unit); return; }
   $("#wrap").classList.toggle("wide", !!r.tool && r.tool !== "content");
-  if (r.unit) { $("#view").innerHTML = viewUnit(r); return; }
+  T.unitViewKey = "";
+  if (r.unit) { $("#view").innerHTML = viewUnit(r); T.unitViewKey = unitViewKey(r); return; }
   const tool = TOOLS.find((t) => t.id === r.tool);
   $("#crumb").innerHTML = `<b>Teaching tools</b> &middot; ${tool.title}`;
-  const views = { access: viewAccess, works: viewWorks, tests: viewTests, stats: viewStats, content: viewContent, groups: viewGroups };
+  const views = { access: viewAccess, works: viewWorks, tests: viewTests, stats: viewStats, content: viewContent, groups: viewGroups, journal: viewJournal };
   $("#view").innerHTML = views[r.tool]();
 }
 
@@ -207,43 +231,286 @@ function viewUnit(r) {
   const u = T.units.find((x) => x.id === r.unit);
   if (!u) return pageHead("Unit", "Unit not found");
   const n = unitNum(u);
-  $("#crumb").innerHTML = `<b>Unit ${n}</b> &middot; ${esc(u.title)}`;
+  $("#crumb").innerHTML = `<b>${esc(uLabel(u))}</b> &middot; ${esc(u.title)}`;
   const g = group();
   const bar = g && u.status !== "soon" ? accessBar(u, g) : "";
-  if (u.status === "soon") return pageHead(`Unit ${n}`, esc(u.title)) + `<div class="locked-msg"><span class="big">🛠</span>This unit is still being prepared. Import its content in <a href="#tools/content">Course content</a>.</div>`;
+  if (u.status === "soon") return pageHead(esc(uLabel(u)), esc(u.title)) + `<div class="locked-msg"><span class="big">🛠</span>This unit is still being prepared. Import its content in <a href="#tools/content">Course content</a>.</div>`;
   const d = T.unitData[u.id];
   if (!d) { loadUnitData(u.id).then(() => render(true)); return `<p class="muted">Loading…</p>`; }
-  if (!d.content) return pageHead(`Unit ${n}`, esc(u.title)) + `<div class="locked-msg">This unit has no content yet.</div>`;
+  if (!d.content) return pageHead(esc(uLabel(u)), esc(u.title)) + `<div class="locked-msg">This unit has no content yet.</div>`;
   const secs = d.content.sections;
   const sec = secs.find((s) => s.id === r.section) || secs[0];
   const i = secs.indexOf(sec);
   const meta = (u.sections || []).find((s) => s.id === sec.id) || {};
-  $("#crumb").innerHTML = `<b>Unit ${n}</b> &middot; ${n}.${i + 1} ${esc(sec.title)}`;
+  $("#crumb").innerHTML = `<b>${esc(uLabel(u))}</b> &middot; ${n}.${i + 1} ${esc(sec.title)}`;
   const blocks = [...sec.blocks];
   for (const note of [...(d.notes[sec.id] || [])].reverse()) blocks.splice(note.at, 0, { type: "teacher-note", html: note.html });
   const prev = secs[i - 1], next = secs[i + 1];
-  return bar + pageHead(`Unit ${n} &middot; ${n}.${i + 1}`, esc(sec.title), esc(meta.subtitle || sec.subtitle || ""))
-    + renderBlocks(blocks, (ex) => ({
-      key: d.keys[ex.id] || {}, readOnly: true,
-      tag: ex.check === "teacher" ? (isManual(ex) ? "Writing check by the teacher" : "Checked by the teacher") : "",
-      before: ex.check === "teacher" && g ? (isManual(ex) ? writingBar(u, ex, g) : exerciseBar(u, ex, g)) : "",
-    }), `${n}.${i + 1}`)
+  const mine = T.practice[u.id] || {};
+  return bar + docxBar(u) + pageHead(`${esc(uLabel(u))}${meta.group ? ` &middot; ${esc(meta.group)}` : ""} &middot; ${n}.${i + 1}`, esc(sec.title), esc(meta.subtitle || sec.subtitle || ""))
+    + `<p class="muted tip">You can type and choose answers here, as the students do: nothing is saved or sent to the students.
+       Under each exercise title you can mark it <b>In-Class</b> or <b>HA</b> and tick <b>Done</b>. The figures on the right update live while the students work (drafts included).
+       ${Object.keys(mine).length ? `<button class="btn small" data-act="practice-clear" data-unit="${esc(u.id)}">Clear my answers</button>` : ""}</p>`
+    + renderBlocks(blocks, (ex) => {
+      const st = exStats(ex);
+      return {
+        key: d.keys[ex.id] || {}, readOnly: false,
+        answers: mine[ex.id] || {},
+        tag: ex.self ? "Self-check by the student" : ex.check === "teacher" ? (isManual(ex) ? "Writing check by the teacher" : "Checked by the teacher") : "",
+        before: g ? toolsBar(u, ex, g, st) : "",
+        itemStat: st.items ? (itemId) => `<span class="istat" data-is="${esc(ex.id)}|${esc(itemId)}">${itemBadge(ex, st.items[itemId])}</span>` : null,
+        after: st.items ? `<div class="mist" data-mi="${esc(ex.id)}" ${T.mistOpen.has(ex.id) ? "" : "hidden"}>${mistakesHTML(ex, st)}</div>` : "",
+      };
+    }, `${n}.${i + 1}`)
     + `<nav class="pager">
       ${prev ? `<a class="pg" href="#${u.id}/${prev.id}"><span class="d">Previous</span><span class="t">${n}.${i} ${esc(prev.title)}</span></a>` : ""}
       ${next ? `<a class="pg next" href="#${u.id}/${next.id}"><span class="d">Next</span><span class="t">${n}.${i + 2} ${esc(next.title)}</span></a>` : ""}
     </nav>`;
 }
 
+// Download the whole unit as a Word file (no interactive elements): Student's Book or Teacher's Book with keys
+function docxBar(u) {
+  return `<div class="dl-bar"><span>Download ${esc(uLabel(u))} as Word:</span>
+    <button class="btn small" data-act="docx" data-unit="${esc(u.id)}" data-ver="student">Student's Book (.docx)</button>
+    <button class="btn small" data-act="docx" data-unit="${esc(u.id)}" data-ver="teacher">Teacher's Book (.docx)</button>
+    <button class="btn small" data-act="keys-toggle" title="Hide the keys and teaching notes, e.g. to show the exercises on the screen in class">${document.body.classList.contains("keys-off") ? "Show keys" : "Hide keys"}</button></div>`;
+}
+async function downloadDocx(unitId, ver, btn) {
+  const u = T.units.find((x) => x.id === unitId);
+  if (!u) return;
+  const old = btn?.textContent;
+  if (btn) { btn.disabled = true; btn.textContent = "Preparing…"; }
+  try {
+    const d = await loadUnitData(unitId);
+    if (!d?.content) throw new Error("This unit has no content yet.");
+    const { exportUnitDocx, saveBlob } = await import("./export-docx.js?v=20261029a");
+    const teacher = ver === "teacher";
+    const sections = d.content.sections.map((s) => { const m = (u.sections || []).find((x) => x.id === s.id) || {}; return { ...s, subtitle: m.subtitle || s.subtitle || "", group: m.group || "" }; });
+    const blob = await exportUnitDocx({ courseTitle: COURSE_TITLE, unitNum: unitNum(u), unitLabel: uLabel(u), unitTitle: u.title, sections,
+      keys: teacher ? d.keys : {}, notes: teacher ? d.notes : {}, teacher });
+    const safe = (t) => String(t).replace(/[^A-Za-z0-9]+/g, "-").replace(/^-|-$/g, "");
+    saveBlob(blob, `${safe(COURSE_TITLE)}_${safe(uLabel(u))}_${teacher ? "Teachers-Book" : "Students-Book"}.docx`);
+  } catch (e) { console.error(e); toast("Could not create the Word file: " + (e.message || e), 6000); }
+  finally { if (btn) { btn.disabled = false; btn.textContent = old; } }
+}
+
 // Exercises marked "check": "teacher" are checked one at a time, when the teacher decides
 function exerciseBar(u, ex, g) {
   const done = (g.releasedEx?.[u.id] || []).includes(ex.id);
-  return `<div class="ex-bar"><span>Group <b>${esc(g.name)}</b>: <span class="pill ${done ? "on" : "off"}">${done ? "checked · results shown" : "not checked yet"}</span></span>
+  return `<div class="tb-row"><span>Group <b>${esc(g.name)}</b>: <span class="pill ${done ? "on" : "off"}">${done ? "checked · results shown" : "not checked yet"}</span></span>
     <span class="sp" style="flex:1"></span>
     ${done
       ? `<button class="btn small" data-act="check-ex" data-unit="${esc(u.id)}" data-ex="${esc(ex.id)}" title="Check again, e.g. for students who answered later">Re-check</button>
          <button class="btn small danger" data-act="uncheck-ex" data-unit="${esc(u.id)}" data-ex="${esc(ex.id)}">Hide results</button>`
       : `<button class="btn small good" data-act="check-ex" data-unit="${esc(u.id)}" data-ex="${esc(ex.id)}" ${g.openUnits.includes(u.id) ? "" : "disabled title=\"Open the unit for the group first\""}>Check this exercise now</button>`}
   </div>`;
+}
+
+// ================================================================== In-Class / HA, Done, live statistics
+// The bar above each exercise in the Teacher's Edition.
+function toolsBar(u, ex, g, st) {
+  const p = g.plan?.[u.id]?.[ex.id] || {};
+  const k = `${u.id}|${ex.id}`;
+  const row = `<div class="tb-row">
+    <span class="seg" role="group" aria-label="Type of work">
+      <button type="button" class="${p.as === "class" ? "on" : ""}" data-act="plan-as" data-unit="${esc(u.id)}" data-ex="${esc(ex.id)}" data-as="class" title="Work done in class">In-Class</button><button type="button" class="${p.as === "home" ? "on" : ""}" data-act="plan-as" data-unit="${esc(u.id)}" data-ex="${esc(ex.id)}" data-as="home" title="Home assignment">HA</button>
+    </span>
+    <label class="tb-done ${p.done ? "on" : ""}"><input type="checkbox" data-plan-done="${esc(k)}" ${p.done ? "checked" : ""}> Done</label>
+    ${p.done ? `<input type="date" class="tb-date" data-plan-date="${esc(k)}" value="${esc(p.date || "")}" title="The lesson when it was done">` : ""}
+    <span class="sp" style="flex:1"></span>
+    <span class="tstat" data-ts="${esc(ex.id)}">${statSummary(ex, st)}</span>
+    ${st.items ? `<button class="btn small" type="button" data-act="mist" data-ex="${esc(ex.id)}">Mistakes</button>` : ""}
+  </div>`;
+  const check = ex.check === "teacher" ? (isManual(ex) ? writingBar(u, ex, g) : exerciseBar(u, ex, g)) : "";
+  return `<div class="ex-bar tbar">${row}${check}</div>`;
+}
+
+// students of the group and their answers in this exercise (drafts and submitted work)
+function exStats(ex) {
+  const keys = T.unitData[T.unitId]?.keys?.[ex.id] || {};
+  const inGroup = new Set(T.students.map((s) => s.uid));
+  const nameOf = (uid) => T.students.find((s) => s.uid === uid)?.name || "?";
+  const subs = T.subs.filter((s) => inGroup.has(s.uid));
+  let answered = 0, done = 0;
+  for (const s of subs) {
+    if (Object.values(s.answers?.[ex.id] || {}).some((v) => String(v ?? "").trim())) answered++;
+    if (doneMap(s.answers)[ex.id] || s.status === "submitted") done++;
+  }
+  const out = { answered, done, total: T.students.length };
+  if (!isAuto(ex) || isTranslation(ex)) return out;
+  let n = 0, ok = 0;
+  out.items = {};
+  for (const it of ex.items || []) {
+    const r = { n: 0, ok: 0, wrong: {} };
+    for (const s of subs) {
+      const v = s.answers?.[ex.id]?.[it.id];
+      if (!String(v ?? "").trim()) continue;
+      r.n++;
+      if (isCorrect(v, keys[it.id], { punct: ex.punct, multi: ex.multi, choice: !!it.choices })) r.ok++;
+      else (r.wrong[norm(v)] ??= { label: answerLabel(ex, String(v).trim()), names: [] }).names.push(nameOf(s.uid));
+    }
+    r.wrong = Object.values(r.wrong).sort((a, b) => b.names.length - a.names.length);
+    out.items[it.id] = r;
+    n += r.n; ok += r.ok;
+  }
+  out.pct = n ? Math.round((100 * ok) / n) : null;
+  out.wrong = n - ok;
+  return out;
+}
+function statSummary(ex, st) {
+  const parts = [`<span title="Students who have answered at least one item">answered <b>${st.answered}/${st.total}</b></span>`,
+    `<span title="Students who have clicked Done (or submitted the unit)">done <b>${st.done}/${st.total}</b></span>`];
+  if (st.items) parts.push(st.pct === null ? `<span class="muted">no answers yet</span>`
+    : `<span class="pct" style="color:${heat(st.pct)}" title="Correct answers among all answers given">correct <b>${st.pct}%</b></span>${st.wrong ? ` <span class="bad-n">${st.wrong} ${st.wrong === 1 ? "mistake" : "mistakes"}</span>` : ""}`);
+  return parts.join(" · ");
+}
+function itemBadge(ex, r) {
+  if (!r || !r.n) return "";
+  const tip = r.wrong.length ? r.wrong.map((w) => `“${w.label}”: ${w.names.join(", ")}`).join("\n") : "All answers are correct";
+  return `<span class="ib" title="${esc(tip)}">${r.ok ? `<span class="ib-ok">✓${r.ok}</span>` : ""}${r.n - r.ok ? `<span class="ib-bad">✗${r.n - r.ok}</span>` : ""}</span>`;
+}
+function mistakesHTML(ex, st) {
+  const rows = (ex.items || []).filter((it) => st.items[it.id]?.wrong.length).map((it) => `<tr><td class="num">${esc(it.id)}</td>
+    <td>${st.items[it.id].wrong.map((w) => `<span class="mw">“${esc(w.label)}”</span> <span class="muted">${esc(w.names.join(", "))}</span>`).join("<br>")}</td></tr>`).join("");
+  return `<div class="mist-h">Students' mistakes (drafts included)</div>` + (rows ? `<table class="t mist-t">${rows}</table>` : `<p class="muted">No mistakes so far.</p>`);
+}
+function unitViewKey(r) {
+  const u = T.units.find((x) => x.id === r.unit), g = group(), d = T.unitData[r.unit];
+  if (!u || !d?.content) return "";
+  return JSON.stringify([u.id, r.section || "", T.gid, u.status, !!g?.openUnits?.includes(u.id), !!g?.releasedUnits?.includes(u.id),
+    g?.releasedEx?.[u.id] || [], g?.feedbackEx?.[u.id] || [], g?.plan?.[u.id] || {}, Object.keys(T.practice[u.id] || {}).length > 0]);
+}
+function patchUnitStats() {
+  const d = T.unitData[T.unitId];
+  if (!d?.content) return;
+  const byId = Object.fromEntries(exercisesOf(d.content).map((ex) => [ex.id, ex]));
+  const cache = {};
+  const stOf = (id) => (cache[id] ??= byId[id] ? exStats(byId[id]) : null);
+  document.querySelectorAll("#view [data-ts]").forEach((el) => { const st = stOf(el.dataset.ts); if (st) el.innerHTML = statSummary(byId[el.dataset.ts], st); });
+  document.querySelectorAll("#view [data-is]").forEach((el) => {
+    const [exId, itemId] = el.dataset.is.split("|");
+    const st = stOf(exId);
+    if (st?.items) el.innerHTML = itemBadge(byId[exId], st.items[itemId]);
+  });
+  document.querySelectorAll("#view [data-mi]").forEach((el) => { const st = stOf(el.dataset.mi); if (st?.items) el.innerHTML = mistakesHTML(byId[el.dataset.mi], st); });
+}
+
+// the teacher's own answers in the unit: kept in memory, never saved
+function onPractice(e) {
+  const el = e.target;
+  if (!el.dataset?.item || !el.dataset.ex || el.matches(".g-score,.g-comment")) return;
+  const r = route();
+  if (!r.unit || !$("#view").contains(el)) return;
+  const v = readInput(el);
+  if (v === null) return;
+  const had = Object.keys(T.practice[r.unit] || {}).length > 0;
+  ((T.practice[r.unit] ??= {})[el.dataset.ex] ??= {})[el.dataset.item] = v;
+  if (!had) T.unitViewKey = unitViewKey(r);   // the "Clear my answers" button appears on the next full drawing
+}
+document.addEventListener("input", onPractice);
+document.addEventListener("change", onPractice);
+
+// In-Class / HA and Done: groups/{gid}.plan[unitId][exId] = {as, done, date}
+document.addEventListener("change", (e) => {
+  const t = e.target;
+  if (t.dataset?.planDone || t.dataset?.planDate) guard(async () => {
+    const [u, ex] = (t.dataset.planDone || t.dataset.planDate).split("|");
+    const p = group()?.plan?.[u]?.[ex] || {};
+    const base = `plan.${u}.${ex}`;
+    if (t.dataset.planDone) {
+      const date = p.date || todayISO();
+      await updateDoc(doc(db, "groups", T.gid), t.checked
+        ? { [`${base}.done`]: true, [`${base}.date`]: date }
+        : { [`${base}.done`]: false, [`${base}.date`]: deleteField() });
+      if (t.checked && p.as === "class") await ensureLesson(date);
+    } else if (t.value) {
+      await updateDoc(doc(db, "groups", T.gid), { [`${base}.date`]: t.value });
+      if (p.as === "class") await ensureLesson(t.value);
+    }
+  });
+});
+async function setPlanAs(u, ex, as) {
+  await guard(async () => {
+    const p = group()?.plan?.[u]?.[ex] || {};
+    const val = p.as === as ? deleteField() : as;      // a second click removes the label
+    await updateDoc(doc(db, "groups", T.gid), { [`plan.${u}.${ex}.as`]: val });
+    if (as === "class" && p.as !== "class" && p.done && p.date) await ensureLesson(p.date);
+  });
+}
+
+// ================================================================== Attendance
+const journalRef = (gid) => doc(db, "answerKeys", `journal~${gid}`);
+async function ensureLesson(date) {
+  if (!T.gid || !date || T.journal?.lessons?.[date]) return;
+  await setDoc(journalRef(T.gid), { groupId: T.gid, lessons: { [date]: { absent: [] } } }, { merge: true });
+}
+// {exId: 0.25} for the in-class exercises done on a day when this student was absent
+function factorsFor(uid, unitId) {
+  const out = {};
+  for (const [exId, p] of Object.entries(group()?.plan?.[unitId] || {}))
+    if (p?.as === "class" && p.done && p.date && (T.journal?.lessons?.[p.date]?.absent || []).includes(uid)) out[exId] = ABSENT_FACTOR;
+  return out;
+}
+function adjustedAuto(auto, factors) {
+  return r2(Object.entries(auto.items).reduce((n, [exId, items]) => n + Object.values(items).filter((x) => x.ok).length * (factors[exId] ?? 1), 0));
+}
+
+function viewJournal() {
+  const g = group();
+  const head = pageHead("Teaching tools", "Attendance", g ? `Group ${esc(g.name)}` : "");
+  if (!g) return head + `<div class="box">First create a group in <a href="#tools/groups">Groups &amp; students</a>.</div>`;
+  if (T.journal === undefined) return head + `<p class="muted">Loading…</p>`;
+  const L = T.journal.lessons || {};
+  const dates = Object.keys(L).sort();
+  // exercises marked Done for each date, in all units
+  const byDate = {};
+  for (const u of T.units) for (const [exId, p] of Object.entries(g.plan?.[u.id] || {})) {
+    if (!p?.done || !p.date) continue;
+    if (!T.unitData[u.id] && !(T.unitLoading ??= new Set()).has(u.id)) { T.unitLoading.add(u.id); loadUnitData(u.id).then(() => render(true)).catch(() => {}); }
+    const num = T.unitData[u.id]?.content ? exerciseNumbers(T.unitData[u.id].content, unitNum(u))[exId] : null;
+    (byDate[p.date] ??= []).push({ u, exId, as: p.as, num: num || `${unitNum(u)} · ${exId}` });
+  }
+  const exList = (date, as) => (byDate[date] || []).filter((x) => x.as === as).sort((a, b) => a.num.localeCompare(b.num, undefined, { numeric: true }))
+    .map((x) => `<span class="jx ${as}">${esc(x.num)}</span>`).join(" ") || `<span class="muted">—</span>`;
+  const absentN = (uid) => dates.filter((d) => (L[d].absent || []).includes(uid)).length;
+  const rows = T.students.map((st) => `<tr><td><b>${esc(st.name)}</b></td>
+    ${dates.map((d) => { const a = (L[d].absent || []).includes(st.uid);
+      return `<td class="jc"><button type="button" class="att ${a ? "abs" : "pres"}" data-act="att" data-date="${esc(d)}" data-uid="${esc(st.uid)}" title="${a ? "Absent: click to mark present" : "Present: click to mark absent"}">${a ? "✗" : "✓"}</button></td>`; }).join("")}
+    <td class="num">${absentN(st.uid) || ""}</td></tr>`).join("");
+  return head + `
+  <div class="box">
+    <div class="row"><label>Lesson date <input type="date" id="j-date" value="${todayISO()}"></label>
+      <button class="btn primary" data-act="lesson-add">Add the lesson</button></div>
+    <p class="muted" style="margin:8px 0 0">Everybody is present in a new lesson: click ✓ to mark a student absent (✗), click again to undo.
+      A lesson is also added automatically when you tick <b>Done</b> on an <b>In-Class</b> exercise.
+      <b>Rule:</b> for the In-Class exercises done on a day when a student was absent, the student gets ${Math.round(ABSENT_FACTOR * 100)}% of the points.
+      If you have already checked the work, click <b>Re-check</b> (or <b>Check this exercise now</b> again) so that changes in attendance reach the students' results.</p>
+    ${T.journal.error ? `<p class="bad-n">The attendance could not be loaded. Check the connection and reload the page.</p>` : ""}
+  </div>
+  ${dates.length ? `<div style="overflow-x:auto"><table class="t jt">
+    <tr><th>Student</th>${dates.map((d) => `<th class="jc">${esc(fmtDate(d).slice(0, 5))}<br><button type="button" class="jdel" data-act="lesson-del" data-date="${esc(d)}" title="Delete this lesson">delete</button></th>`).join("")}<th>Absent</th></tr>
+    ${rows || `<tr><td colspan="${dates.length + 2}" class="muted">There are no students in this group yet.</td></tr>`}
+    <tr class="jfoot"><td>Present</td>${dates.map((d) => `<td class="jc num">${T.students.length - (L[d].absent || []).filter((uid) => T.students.some((s) => s.uid === uid)).length}</td>`).join("")}<td></td></tr>
+  </table></div>
+  <h3>What was done</h3>
+  <table class="t"><tr><th>Date</th><th>In-Class</th><th>HA</th><th>Absent</th></tr>
+    ${[...dates].reverse().map((d) => `<tr><td>${esc(fmtDate(d))}</td><td>${exList(d, "class")}</td><td>${exList(d, "home")}</td>
+      <td>${(L[d].absent || []).map((uid) => esc(T.students.find((s) => s.uid === uid)?.name || "")).filter(Boolean).join(", ") || `<span class="muted">—</span>`}</td></tr>`).join("")}
+  </table>` : `<div class="box muted">No lessons yet. Choose a date and click “Add the lesson”.</div>`}`;
+}
+async function addLesson() {
+  const date = $("#j-date")?.value;
+  if (!date) return toast("Choose a date first.");
+  if (T.journal?.lessons?.[date]) return toast("This lesson is already in the list.");
+  await guard(() => ensureLesson(date));
+}
+async function toggleAbsent(date, uid) {
+  const a = (T.journal?.lessons?.[date]?.absent || []).includes(uid);
+  await guard(() => setDoc(journalRef(T.gid), { groupId: T.gid, lessons: { [date]: { absent: a ? arrayRemove(uid) : arrayUnion(uid) } } }, { merge: true }));
+}
+async function deleteLesson(date) {
+  if (!confirm(`Delete the lesson of ${fmtDate(date)} from the attendance list?`)) return;
+  await guard(() => updateDoc(journalRef(T.gid), { [`lessons.${date}`]: deleteField() }));
 }
 
 async function checkExercise(gid, unitId, exId) {
@@ -258,9 +525,10 @@ async function checkExercise(gid, unitId, exId) {
     for (const s of subs) {
       const r = gradeExercise(ex, s.answers?.[exId], keys[exId]);
       if (!T.showCorrect) for (const it of Object.values(r.items)) delete it.correct;
+      const f = factorsFor(s.uid, unitId)[exId] ?? 1;      // absent from the lesson: 25% of the points
       batch.set(doc(db, "exerciseResults", subId(unitId, s.uid)), {
         uid: s.uid, groupId: gid, unitId,
-        items: { [exId]: r.items }, scores: { [exId]: { score: r.score, max: r.max } },
+        items: { [exId]: r.items }, scores: { [exId]: { score: r2(r.score * f), max: r.max } }, factors: { [exId]: f },
         updatedAt: serverTimestamp(),
       }, { merge: true });
       if (++n % 400 === 0) { await batch.commit(); batch = writeBatch(db); }
@@ -274,21 +542,25 @@ async function checkExercise(gid, unitId, exId) {
 // Free writing ("kind": "open", "check": "teacher"): the check gives feedback, the text stays editable
 function writingBar(u, ex, g) {
   const done = (g.feedbackEx?.[u.id] || []).includes(ex.id);
-  return `<div class="ex-bar"><span>Group <b>${esc(g.name)}</b>: <span class="pill ${done ? "on" : "off"}">${done ? "feedback shown" : "not checked yet"}</span></span>
+  const what = isTranslation(ex) ? "translations" : "writing";
+  return `<div class="tb-row"><span>Group <b>${esc(g.name)}</b>: <span class="pill ${done ? "on" : "off"}">${done ? "feedback shown" : "not checked yet"}</span></span>
     <span class="sp" style="flex:1"></span>
     <span id="wcheck-progress" class="muted"></span>
-    <button class="btn small good" data-act="check-writing" data-unit="${esc(u.id)}" data-ex="${esc(ex.id)}" ${g.openUnits.includes(u.id) ? "" : "disabled"}>${done ? "Check again" : "Check the writing now"}</button>
+    <button class="btn small good" data-act="check-writing" data-unit="${esc(u.id)}" data-ex="${esc(ex.id)}" ${g.openUnits.includes(u.id) ? "" : "disabled"}>${done ? "Check again" : `Check the ${what} now`}</button>
     ${done ? `<button class="btn small danger" data-act="hide-writing" data-unit="${esc(u.id)}" data-ex="${esc(ex.id)}">Hide feedback</button>` : ""}
   </div>`;
 }
 
 async function checkWriting(gid, unitId, exId) {
   await guard(async () => {
-    const { content } = await loadUnitData(unitId, true);
+    const { content, keys } = await loadUnitData(unitId, true);
     const ex = exercisesOf(content).find((e) => e.id === exId);
+    const tr = isTranslation(ex);                       // translations: also compared with the model translation
+    const exKeys = keys?.[exId] || {};
+    const itemIds = new Set((ex.items || []).map((it) => it.id));
     const subs = (await getDocs(query(collection(db, "submissions"), where("groupId", "==", gid), where("unitId", "==", unitId)))).docs.map((d) => d.data())
       .filter((s) => Object.values(s.answers?.[exId] || {}).some((v) => String(v).trim()));
-    if (!confirm(`Check the writing in “${ex.title}”?\nStudents with answers: ${subs.length}.\nThe texts are sent to LanguageTool for the grammar check (about 3 seconds per student). Students will see the feedback and can correct their texts.`)) return;
+    if (!confirm(`Check the ${tr ? "translations" : "writing"} in “${ex.title}”?\nStudents with answers: ${subs.length}.\nThe texts are sent to LanguageTool for the grammar and spelling check (about 3 seconds per student).${tr ? "\nThe vocabulary is compared with the model translations and the unit vocabulary" + (ex.grammarFocus ? ", the tenses and the nouns too" : "") + " (this part stays in your browser)." : ""} Students will see the feedback and can correct their texts.`)) return;
     const V = await loadVocab();
     const phrases = unitVocabulary(content);
     let n = 0, ltFailed = 0;
@@ -296,14 +568,18 @@ async function checkWriting(gid, unitId, exId) {
       n++;
       const prog = document.querySelector("#wcheck-progress");
       if (prog) prog.textContent = `Checking ${n} of ${subs.length}…`;
-      const texts = s.answers[exId] || {};
+      const texts = Object.fromEntries(Object.entries(s.answers[exId] || {}).filter(([k]) => itemIds.has(k)));   // not the "type" menus
       let issues = {}, grammarError = false;
       try { issues = await grammarCheck(texts); } catch (e) { console.warn(e); grammarError = true; ltFailed++; }
       const fb = {};
       for (const it of ex.items || []) {
         const text = String(texts[it.id] || "");
         if (!text.trim()) continue;
-        fb[it.id] = { text, issues: issues[it.id] || [], grammarError, vocab: vocabProfile(text, V, phrases), unitTotal: phrases.length };
+        fb[it.id] = tr
+          ? { text, issues: issues[it.id] || [], grammarError, translation: true, vocab: vocabProfile(text, V, phrases),
+              ...(exKeys[it.id] ? { target: targetCheck(text, [].concat(exKeys[it.id]).join(" "), phrases) } : {}),
+              ...(ex.grammarFocus && exKeys[it.id] ? { focus: focusCheck(text, exKeys[it.id]) } : {}) }
+          : { text, issues: issues[it.id] || [], grammarError, vocab: vocabProfile(text, V, phrases), unitTotal: phrases.length };
       }
       await setDoc(doc(db, "exerciseResults", subId(unitId, s.uid)), {
         uid: s.uid, groupId: gid, unitId,
@@ -312,7 +588,7 @@ async function checkWriting(gid, unitId, exId) {
       if (n < subs.length && !grammarError) await sleep(3200);   // LanguageTool: at most 20 requests a minute
     }
     await updateDoc(doc(db, "groups", gid), { [`feedbackEx.${unitId}`]: arrayUnion(exId) });
-    toast(ltFailed ? `Done. The grammar check was not available for ${ltFailed} of ${subs.length}; the vocabulary check worked.` : `Done: ${subs.length} texts checked. Students can see the feedback now.`, 7000);
+    toast(ltFailed ? `Done. LanguageTool was not available for ${ltFailed} of ${subs.length}; the vocabulary check worked.` : `Done: ${subs.length} ${tr ? "translations" : "texts"} checked. Students can see the feedback now.`, 7000);
   });
 }
 
@@ -371,6 +647,9 @@ document.addEventListener("change", (e) => {
   }
 });
 
+// keys and teaching notes hidden (button "Hide keys" above a unit); remembered in this browser
+try { if (localStorage.getItem("keysOff")) document.body.classList.add("keys-off"); } catch {}
+
 document.addEventListener("click", (e) => {
   const b = e.target.closest("[data-act]");
   if (!b) return;
@@ -382,6 +661,12 @@ document.addEventListener("click", (e) => {
       await updateDoc(doc(db, "groups", T.gid), { openUnits: open ? arrayRemove(u) : arrayUnion(u) });
     }),
     "release": () => releaseUnit(T.gid, u),
+    "docx": () => downloadDocx(u, b.dataset.ver, b),
+    "keys-toggle": () => {
+      const off = document.body.classList.toggle("keys-off");
+      try { localStorage.setItem("keysOff", off ? "1" : ""); } catch {}
+      document.querySelectorAll('[data-act="keys-toggle"]').forEach((x) => { x.textContent = off ? "Show keys" : "Hide keys"; });
+    },
     "check-ex": () => checkExercise(T.gid, u, b.dataset.ex),
     "check-writing": () => checkWriting(T.gid, u, b.dataset.ex),
     "hide-writing": () => guard(async () => updateDoc(doc(db, "groups", T.gid), { [`feedbackEx.${u}`]: arrayRemove(b.dataset.ex) })),
@@ -401,6 +686,16 @@ document.addEventListener("click", (e) => {
       await updateDoc(doc(db, "submissions", subId(T.unitId, b.dataset.uid)), { status: "draft", returnNote: note.trim().slice(0, 1000), returnedAt: serverTimestamp() });
       toast("The work has been returned to the student.");
     }),
+    "plan-as": () => setPlanAs(u, b.dataset.ex, b.dataset.as),
+    "mist": () => {
+      const id = b.dataset.ex;
+      T.mistOpen.has(id) ? T.mistOpen.delete(id) : T.mistOpen.add(id);
+      document.querySelectorAll(`[data-mi="${CSS.escape(id)}"]`).forEach((el) => (el.hidden = !T.mistOpen.has(id)));
+    },
+    "practice-clear": () => { delete T.practice[u]; render(true); },
+    "lesson-add": () => addLesson(),
+    "lesson-del": () => deleteLesson(b.dataset.date),
+    "att": () => toggleAbsent(b.dataset.date, b.dataset.uid),
     "import": () => importCourse(),
     "delete-unit": () => deleteUnit(u),
     "create-group": () => createGroup(),
@@ -437,7 +732,7 @@ async function releaseUnit(gid, unitId) {
       .docs.map((d) => [d.data().uid, d.data()]));
     let batch = writeBatch(db), n = 0;
     for (const sub of subs) {
-      const r = buildResult({ sub, content, keys, manual: prev[sub.uid]?.manual || {}, showCorrect: T.showCorrect });
+      const r = buildResult({ sub, content, keys, manual: prev[sub.uid]?.manual || {}, showCorrect: T.showCorrect, factors: factorsFor(sub.uid, unitId) });
       batch.set(doc(db, "results", subId(unitId, sub.uid)), { ...r, gradedAt: serverTimestamp() });
       if (++n % 400 === 0) { await batch.commit(); batch = writeBatch(db); }
     }
@@ -451,7 +746,7 @@ async function releaseUnit(gid, unitId) {
 function viewWorks() {
   const g = group(), u = unit();
   const head = pageHead("Teaching tools", "Student work",
-    g && u ? `Unit ${unitNum(u)} · ${esc(u.title)} — group ${esc(g.name)}` : "");
+    g && u ? `${esc(uLabel(u))} · ${esc(u.title)} — group ${esc(g.name)}` : "");
   if (!g || !u) return head + `<div class="box">Choose a group and a unit at the top of the page.</div>`;
   const data = T.unitData[u.id];
   if (!data) return head + `<p class="muted">Loading…</p>`;
@@ -464,6 +759,8 @@ function viewWorks() {
     const s = subBy[st.uid], r = T.results[st.uid];
     const filled = s ? exs.reduce((n, ex) => n + (ex.items || []).filter((it) => String(s.answers?.[ex.id]?.[it.id] ?? "").trim()).length, 0) : 0;
     const auto = s ? gradeAuto(data.content, s.answers, data.keys) : null;
+    const f = factorsFor(st.uid, u.id), fN = Object.keys(f).length;
+    const nDone = s ? exs.filter((ex) => doneMap(s.answers)[ex.id]).length : 0;
     const status = !s ? `<span class="pill off">not started</span>` : s.status === "submitted" ? `<span class="pill on">submitted</span>` : s.returnedAt ? `<span class="pill warn">returned</span>` : `<span class="pill warn">draft</span>`;
     const openDone = r ? openTotal - (r.manualPending ?? openTotal) : 0;
     return `<tr class="${T.selected === st.uid ? "sel" : ""}">
@@ -471,16 +768,17 @@ function viewWorks() {
       <td>${status}</td>
       <td>${s ? fmtTime(s.status === "submitted" ? s.submittedAt : s.updatedAt) : ""}</td>
       <td class="num">${filled} / ${totalItems}</td>
-      <td class="num">${auto ? `${auto.score} / ${auto.max}` : ""}</td>
+      <td class="num">${s ? `${nDone} / ${exs.length}` : ""}</td>
+      <td class="num">${auto ? `${fN ? adjustedAuto(auto, f) : auto.score} / ${auto.max}` : ""}${fN ? `<br><span class="pill warn" title="Absent: ${fN} in-class ${fN === 1 ? "exercise counts" : "exercises count"} ${Math.round(ABSENT_FACTOR * 100)}%">absent · ${fN}</span>` : ""}</td>
       <td class="num">${openTotal ? `${openDone} / ${openTotal}` : "—"}</td>
       <td class="num">${r ? `<b>${r.score} / ${r.max}</b>` : ""}</td>
       <td>${s ? `<button class="btn small" data-act="select-student" data-uid="${esc(st.uid)}">Open</button>` : ""}</td>
     </tr>`;
   }).join("");
   return head + `
-    <p class="muted">The table updates live while students work. “Auto” is a preliminary score against the keys (students do not see it until you release the results). “Open” shows how many open answers you have already marked.</p>
-    <table class="t"><tr><th>Student</th><th>Status</th><th>Last change</th><th>Answered</th><th>Auto</th><th>Open</th><th>Total</th><th></th></tr>
-    ${rows || `<tr><td colspan="8" class="muted">There are no students in this group yet.</td></tr>`}</table>
+    <p class="muted">The table updates live while students work. “Done” shows how many exercises the student has marked as done. “Auto” is a preliminary score against the keys (students do not see it until you release the results); for a student who was absent, in-class exercises of that lesson count ${Math.round(ABSENT_FACTOR * 100)}%. “Open” shows how many open answers you have already marked.</p>
+    <table class="t"><tr><th>Student</th><th>Status</th><th>Last change</th><th>Answered</th><th>Done</th><th>Auto</th><th>Open</th><th>Total</th><th></th></tr>
+    ${rows || `<tr><td colspan="9" class="muted">There are no students in this group yet.</td></tr>`}</table>
     <div id="detail">${T.selected ? studentDetail(T.selected, data) : ""}</div>`;
 }
 
@@ -491,14 +789,17 @@ function studentDetail(uid, data) {
   const r = T.results[uid];
   const auto = gradeAuto(data.content, sub.answers, data.keys);
   const u = unit(), n = unitNum(u);
+  const f = factorsFor(uid, u.id);
   const body = data.content.sections.map((sec, i) => {
     const exs = (sec.blocks || []).filter((b) => b.type === "exercise");
     if (!exs.length) return "";
     return `<h3>${n}.${i + 1} ${esc(sec.title)}</h3>` + exs.map((ex, j) => renderExercise(ex, {
-      num: `${n}.${i + 1}.${j + 1}`,
+      num: exNum(ex, `${n}.${i + 1}.${j + 1}`),
+      tag: sub.answers?._done?.[ex.id] ? "Marked done" : "Not marked done",
       answers: sub.answers?.[ex.id] || {},
       readOnly: true,
-      auto: isAuto(ex) ? auto.items[ex.id] : undefined,
+      auto: isAuto(ex) || hasPick(ex) ? auto.items[ex.id] : undefined,
+      factor: f[ex.id],
       manual: r?.manual?.[ex.id],
       grading: isManual(ex),
       itemExtra: T.exr?.[uid]?.feedback?.[ex.id] ? (itemId) => feedbackHTML(T.exr[uid].feedback[ex.id][itemId], { checkedAt: fmtTime(T.exr[uid].feedbackAt?.[ex.id]) }) : null,
@@ -506,7 +807,7 @@ function studentDetail(uid, data) {
   }).join("");
   return `<div class="box">
     <div class="row" style="justify-content:space-between">
-      <h2 style="margin:0">${esc(st.name)} <span class="muted" style="font-size:16px">· auto-checked ${auto.score}/${auto.max}</span></h2>
+      <h2 style="margin:0">${esc(st.name)} <span class="muted" style="font-size:16px">· auto-checked ${Object.keys(f).length ? adjustedAuto(auto, f) : auto.score}/${auto.max}</span></h2>
       <div class="row">
         ${sub.status === "submitted" && !group()?.releasedUnits.includes(T.unitId) ? `<button class="btn small" data-act="return" data-uid="${esc(uid)}">Return for revision</button>` : ""}
         <button class="btn small primary" data-act="save-grades" data-uid="${esc(uid)}">Save marks</button>
@@ -530,7 +831,7 @@ async function saveGrades(uid) {
       manual[ex][it] = { score: inp.value === "" ? null : Number(inp.value), comment: com?.value || "" };
     });
     const showCorrect = T.results[uid]?.showCorrect ?? T.showCorrect;
-    const r = buildResult({ sub, content: data.content, keys: data.keys, manual, showCorrect });
+    const r = buildResult({ sub, content: data.content, keys: data.keys, manual, showCorrect, factors: factorsFor(uid, T.unitId) });
     await setDoc(doc(db, "results", subId(T.unitId, uid)), { ...r, gradedAt: serverTimestamp() });
     document.activeElement?.blur();
     toast("Marks saved.");
@@ -542,7 +843,7 @@ async function saveGrades(uid) {
 function viewStats() {
   const g = group(), u = unit();
   const head = pageHead("Teaching tools", "Analytics",
-    g && u ? `Unit ${unitNum(u)} · ${esc(u.title)} — group ${esc(g.name)}` : "")
+    g && u ? `${esc(uLabel(u))} · ${esc(u.title)} — group ${esc(g.name)}` : "")
     + `<label class="row"><input type="checkbox" id="inc-drafts" ${T.includeDrafts ? "checked" : ""}> include drafts that have not been submitted</label>`;
   if (!g || !u) return head + `<div class="box">Choose a group and a unit at the top of the page.</div>`;
   const data = T.unitData[u.id];
@@ -621,9 +922,11 @@ function heat(p, light) {
 // ================================================================== Course content
 function viewContent() {
   const rows = T.units.map((u) => `<tr>
-    <td class="num">${esc(u.order)}</td><td><code>${esc(u.id)}</code></td><td>${u.status === "soon" ? esc(u.title) : `<a href="#${esc(u.id)}">${esc(u.title)}</a>`}</td>
+    <td class="num">${esc(unitNo(u))}</td><td><code>${esc(u.id)}</code></td><td>${u.status === "soon" ? esc(u.title) : `<a href="#${esc(u.id)}">${esc(u.title)}</a>`}</td>
     <td>${u.status === "soon" ? `<span class="pill off">coming soon</span>` : `<span class="pill on">${(u.sections || []).length} sections</span>`}</td>
-    <td><button class="btn small danger" data-act="delete-unit" data-unit="${esc(u.id)}">Delete</button></td></tr>`).join("");
+    <td>${u.status === "soon" ? "" : `<button class="btn small" data-act="docx" data-unit="${esc(u.id)}" data-ver="student" title="Student's Book in Word">Student .docx</button>
+      <button class="btn small" data-act="docx" data-unit="${esc(u.id)}" data-ver="teacher" title="Teacher's Book in Word, with keys and notes">Teacher .docx</button>`}
+      <button class="btn small danger" data-act="delete-unit" data-unit="${esc(u.id)}">Delete</button></td></tr>`).join("");
   return pageHead("Teaching tools", "Course content", "Units are imported from a JSON file that you keep on your computer.") + `
   <div class="box">
     <h3 style="margin-top:0">Import units from JSON</h3>
@@ -643,17 +946,24 @@ function stripExercise(b, seen, where) {
   if (!KIND_LABEL[b.kind]) throw new Error(`Exercise ${b.id}: unknown kind “${b.kind}” (gap | match | mcq | open)`);
   const keys = {};
   const items = (b.items || []).map((it) => {
-    const { answer, ...rest } = it;
+    const { answer, pickAnswer, ...rest } = it;
     if (it.id === undefined) throw new Error(`Exercise ${b.id}: an item has no id`);
     rest.id = String(it.id);
+    if (b.kind === "open" && it.choices) {
+      if (!pickAnswer) throw new Error(`Exercise ${b.id}, item ${it.id}: the dropdown has no answer (pickAnswer)`);
+      keys[rest.id + "-type"] = pickAnswer;
+    }
     if (b.kind !== "open" && b.graded !== false) {
       if (answer === undefined || answer === "") throw new Error(`Exercise ${b.id}, item ${it.id}: no answer`);
+      if (Array.isArray(answer) && answer.some(Array.isArray)) throw new Error(`Exercise ${b.id}, item ${it.id}: the key has a list inside a list (the database cannot store it)`);
       keys[rest.id] = answer;
     }
     else if (b.kind === "open" && answer) keys[rest.id] = answer;   // model answer, teacher only
     return rest;
   });
-  return { ex: { ...b, type: "exercise", items }, keys };
+  // self-check exercises ("self": true, the Supplementary Exercises): the key goes with the exercise, so that the student can check it at once
+  const self = b.self && b.kind !== "open" && b.graded !== false && Object.keys(keys).length ? { selfKey: keys } : {};
+  return { ex: { ...b, type: "exercise", items, ...self }, keys };
 }
 
 function splitUnit(u) {
@@ -662,8 +972,9 @@ function splitUnit(u) {
   const hasContent = Array.isArray(u.sections) && u.sections.some((s) => (s.blocks || []).length);
   const meta = {
     title: u.title, order: Number(u.order ?? 0),
+    ...(u.label ? { label: String(u.label) } : {}), ...(u.num !== undefined ? { num: String(u.num) } : {}), ...(u.series ? { series: String(u.series) } : {}),
     status: u.status || (hasContent ? "ready" : "soon"),
-    sections: (u.sections || []).map((s) => ({ id: s.id, title: s.title, ...(s.subtitle ? { subtitle: s.subtitle } : {}) })),
+    sections: (u.sections || []).map((s) => ({ id: s.id, title: s.title, ...(s.subtitle ? { subtitle: s.subtitle } : {}), ...(s.group ? { group: s.group } : {}) })),
   };
   // timed tests: hidden from students until the teacher opens them
   const tests = {}, testKeys = {};
@@ -725,7 +1036,7 @@ async function importCourse() {
     const summary = parts.filter((p) => p.content).map((p, i) => {
       const u = list[parts.indexOf(p)];
       const nEx = p.content.sections.reduce((n, sec) => n + sec.blocks.filter((b) => b.type === "exercise" || b.numbered).length, 0);
-      return `Unit ${u.order || i + 1}: ${p.content.sections.length} ${p.content.sections.length === 1 ? "section" : "sections"}, ${nEx} exercises`;
+      return `${unitLabel(u, i)}: ${p.content.sections.length} ${p.content.sections.length === 1 ? "section" : "sections"}, ${nEx} exercises`;
     }).join("; ");
     setImportStatus(`<b style="color:var(--ok)">✓ Imported ${parts.length} units at ${fmtTime(new Date())}.</b> ${esc(summary)}`);
     toast(`Units imported: ${parts.length}`);
@@ -877,7 +1188,7 @@ function viewTests() {
       : cfg?.open ? `<span class="pill warn">open now</span>`
       : cfg ? `<span class="pill off">closed</span>` : `<span class="pill off">hidden</span>`;
     return `<tr class="${T.testSel === t.key ? "sel" : ""}">
-      <td><b>${esc(t.title)}</b><br><small class="muted">Unit ${u ? unitNum(u) : esc(t.unitId)}</small></td>
+      <td><b>${esc(t.title)}</b><br><small class="muted">${u ? esc(uLabel(u)) : esc(t.unitId)}</small></td>
       <td class="num">${t.minutes} min</td>
       <td>${status}</td>
       <td class="row">

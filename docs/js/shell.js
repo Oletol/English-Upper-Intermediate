@@ -1,6 +1,6 @@
 // Page shell shared by the student and teacher pages:
 // collapsible sidebar (desktop: slides away; mobile: drawer) and the unit accordion.
-import { esc } from "./common.js?v=20261015c";
+import { esc } from "./common.js?v=20261029a";
 
 const LS_KEY = "sbCollapsed";
 
@@ -26,28 +26,36 @@ const manual = new Set();
 let lastUnit = null;
 
 /**
- * units:  [{id, title, order, status, sections:[{id,title,subtitle}]}]
+ * units:  [{id, title, order, status, label?, num?, series?, sections:[{id,title,subtitle}]}]
  * state(u) -> { locked: bool, note: string, noteClass: string }
  * route:  { unit, section }
  */
 export function renderUnitNav(el, { units, state, route, hrefPrefix = "", empty = "" }) {
   if (route.unit !== lastUnit) { manual.clear(); lastUnit = route.unit; }
   if (!units.length) { el.innerHTML = `<div class="sb-empty">${empty}</div>`; return; }
+  // weekly course: units grouped under sidebar headings ("Weeks", "Home Assignments", "Supplementary")
+  const grouped = units.some((u) => u.series);
+  const lbl = el.previousElementSibling;
+  if (lbl?.classList.contains("sb-label")) lbl.hidden = grouped;
+  let series = null;
   el.innerHTML = units.map((u, i) => {
     const st = state(u);
-    const num = u.order || i + 1;
+    const num = u.num ?? u.order ?? i + 1;
+    const head = grouped && (u.series || "") !== series ? `<div class="sb-label sb-series">${esc((series = u.series || ""))}</div>` : "";
     const current = route.unit === u.id;
     const canOpen = !st.locked && (u.sections || []).length && u.status !== "soon";
     const open = canOpen && (current || manual.has(u.id));
+    let grp = null;   // sections grouped inside the week: Theory, Classwork, Home Assignments, Supplementary
     const secs = canOpen ? (u.sections || []).map((s, j) => {
       const on = current && (route.section || u.sections[0]?.id) === s.id;
-      return `<a class="sb-item ${on ? "on" : ""}" href="#${hrefPrefix}${esc(u.id)}/${esc(s.id)}">
+      const gh = s.group && s.group !== grp ? `<div class="sb-sgroup">${esc((grp = s.group))}</div>` : "";
+      return `${gh}<a class="sb-item ${on ? "on" : ""}" href="#${hrefPrefix}${esc(u.id)}/${esc(s.id)}">
         <span class="n">${num}.${j + 1}</span><span class="t">${esc(s.title)}${s.subtitle ? `<span class="s">${esc(s.subtitle)}</span>` : ""}</span></a>`;
     }).join("") : "";
-    return `<div class="sb-unit ${open ? "open" : ""} ${st.locked ? "locked" : ""} ${current ? "current" : ""}">
+    return `${head}<div class="sb-unit ${open ? "open" : ""} ${st.locked ? "locked" : ""} ${current ? "current" : ""}">
       <button class="sb-uh" type="button" data-unit="${esc(u.id)}" data-can-open="${canOpen ? 1 : 0}">
         <span class="u-n">${num}</span>
-        <span class="u-t">${esc(u.title)}${st.note ? `<span class="u-s ${st.noteClass || ""}">${st.note}</span>` : ""}</span>
+        <span class="u-t">${u.label ? `<span class="u-l">${esc(u.label)}</span>` : ""}${esc(u.title)}${st.note ? `<span class="u-s ${st.noteClass || ""}">${st.note}</span>` : ""}</span>
         ${canOpen ? `<span class="chev">${open ? "–" : "+"}</span>` : ""}
       </button>
       ${secs ? `<div class="sb-secs">${secs}</div>` : ""}

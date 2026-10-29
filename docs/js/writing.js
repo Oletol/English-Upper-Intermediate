@@ -2,7 +2,8 @@
 // Octanove C1–C2, Google 10,000 frequency list as a fallback) and use of the unit's vocabulary.
 // The check runs in the teacher's browser when the teacher clicks the button; the result is
 // saved for each student in exerciseResults and shown under their text.
-import { esc } from "./common.js?v=20261015c";
+import { esc } from "./common.js?v=20261029a";
+import { tenseName } from "./grammar-focus.js?v=20261029a";
 
 const LT_URL = "https://api.languagetool.org/v2/check";
 const LT_LANG = "en-GB";
@@ -100,15 +101,30 @@ export function phraseUsed(phrase, toks) {
   return false;
 }
 
-// The unit's vocabulary database: flashcard fronts + any "vocab" lists in exercises
+// The unit's vocabulary database: flashcard fronts + any "vocab" lists in exercises.
+// Discussion cards are questions, not vocabulary. A card may list its phrases in "vocab"
+// (e.g. "sit / take an exam" = ["sit an exam", "take an exam"]); otherwise the front is cleaned:
+// "(v)", "(to)" and other notes in brackets are dropped and "lecture / seminar" gives two phrases.
+export function cardPhrases(c) {
+  if (Array.isArray(c.vocab)) return c.vocab;
+  return String(c.front || "").replace(/\([^)]*\)/g, " ").split(/\s+\/\s+/).map((x) => x.replace(/\s+/g, " ").trim()).filter(Boolean);
+}
 export function unitVocabulary(content) {
   const out = new Set();
   for (const s of content?.sections || [])
     for (const b of s.blocks || []) {
-      if (b.type === "flashcards") (b.cards || []).forEach((c) => out.add(c.front));
+      if (b.type === "flashcards" && b.style !== "discussion") (b.cards || []).forEach((c) => cardPhrases(c).forEach((v) => out.add(v)));
       if (Array.isArray(b.vocab)) b.vocab.forEach((v) => out.add(v));
     }
   return [...out];
+}
+
+// Translations: which unit phrases the model translation uses, and which of them the student used
+export function targetCheck(text, model, unitPhrases = []) {
+  const want = unitPhrases.filter((p) => phraseUsed(p, tokens(model)));
+  const toks = tokens(text).map((t) => t.replace(/'(s|t|ll|re|ve|d|m)$/, ""));
+  const used = want.filter((p) => phraseUsed(p, toks));
+  return { want, used, missing: want.filter((p) => !used.includes(p)) };
 }
 
 // ------------------------------------------------------------------ grammar (LanguageTool)
@@ -158,14 +174,42 @@ export function feedbackHTML(fb, { checkedAt } = {}) {
   const total = v ? LEVELS.reduce((n, l) => n + v.counts[l], 0) || 1 : 1;
   const bars = v ? LEVELS.map((l) => `<span class="lvchip lv-${l}" title="${l}: ${v.counts[l]} words">${l} <b>${Math.round((100 * v.counts[l]) / total)}%</b></span>`).join("") : "";
   return `<div class="wfb">
-    <div class="wfb-h">Feedback on your text${checkedAt ? ` <span class="muted">· checked ${esc(checkedAt)}</span>` : ""}</div>
+    <div class="wfb-h">Feedback on your ${fb.translation ? "translation" : "text"}${checkedAt ? ` <span class="muted">· checked ${esc(checkedAt)}</span>` : ""}</div>
     ${fb.grammarError ? `<p class="muted">The grammar check was not available this time.</p>` : ""}
     <div class="wfb-text">${html}</div>
-    ${issues ? `<ul class="wfb-issues">${issues}</ul>` : fb.grammarError ? "" : `<p class="wfb-ok">No grammar or spelling problems were found.</p>`}
+    ${issues ? `<ul class="wfb-issues">${issues}</ul>` : fb.grammarError ? "" : `<p class="wfb-ok">LanguageTool found no grammar or spelling problems.</p>`}
+    ${focusHTML(fb.focus)}
+    ${targetHTML(fb.target)}
     ${v ? `<div class="wfb-v"><span class="muted">${v.words} words</span> ${bars}</div>
       ${v.high.length ? `<p class="wfb-line"><b>Words at B2 and above:</b> ${v.high.map((x) => `${esc(x.w)} <small>${x.l}</small>`).join(", ")}</p>` : ""}
       ${fb.unitTotal ? `<p class="wfb-line"><b>Unit phrases used (${v.unitUsed.length} of ${fb.unitTotal}):</b> ${v.unitUsed.length ? v.unitUsed.map(esc).join(", ") : "none yet"}</p>` : ""}
       ${v.offList.length ? `<p class="wfb-line muted">Not in the word lists (names, rare words or misspellings): ${v.offList.map(esc).join(", ")}</p>` : ""}` : ""}
-    <p class="wfb-src">Grammar suggestions by <a href="https://languagetool.org" target="_blank">LanguageTool</a> · vocabulary levels from the CEFR-J Wordlist and the Octanove Vocabulary Profile</p>
+    <p class="wfb-src">Grammar suggestions by <a href="https://languagetool.org" target="_blank">LanguageTool</a>${v ? " · vocabulary levels from the CEFR-J Wordlist and the Octanove Vocabulary Profile" : ""}</p>
+  </div>`;
+}
+
+// unit vocabulary in a translation, compared with the model translation
+function targetHTML(t) {
+  if (!t || !t.want?.length) return "";
+  return `<p class="wfb-line"><b>Unit words in this sentence (${t.used.length} of ${t.want.length}):</b> ${t.want.map((p) => t.used.includes(p) ? `<span class="tw ok">${esc(p)}</span>` : `<span class="tw miss">${esc(p)}</span>`).join(" ")}</p>
+    ${t.missing.length ? `<p class="wfb-line muted">Not found in your translation: ${t.missing.map(esc).join(", ")}. A good synonym is also fine: your teacher decides.</p>` : ""}`;
+}
+
+// grammar of the week in a translation: tenses and nouns compared with the model translation
+function focusHTML(fc) {
+  if (!fc) return "";
+  const forms = (fc.forms || []).filter((f) => f.tense !== "PrI" || f.passive);
+  const chips = forms.map((f) => `<span class="gf-chip"><span class="gf-w">${esc(f.words)}</span> ${esc(tenseName(f.tense))}${f.passive ? " Passive" : ""}</span>`).join("");
+  const lines = [
+    ...(fc.missing || []).map((t) => `<li>This sentence needs the <b>${esc(tenseName(t))}</b>, and it is not in your translation.</li>`),
+    ...(fc.fewer || []).map((t) => `<li>Check every verb that needs the <b>${esc(tenseName(t))}</b>: your translation has fewer such forms than the task needs.</li>`),
+    ...(fc.extra || []).map((e) => `<li><b>${esc(tenseName(e.tense))}</b> (${e.words.map((x) => `“${esc(x)}”`).join(", ")}): is this the right tense here?</li>`),
+    ...(fc.nouns || []).map((n) => `<li>${esc(n)}</li>`),
+  ];
+  return `<div class="gf">
+    <div class="gf-h">Grammar of the week</div>
+    ${chips ? `<div class="gf-forms"><span class="muted">Your verb forms:</span> ${chips}</div>` : ""}
+    ${lines.length ? `<ul class="gf-issues">${lines.join("")}</ul>` : `<p class="wfb-ok">The tenses and the nouns match the task.</p>`}
+    <p class="gf-note">This is an automatic hint. A different correct translation can also get a note here: your teacher makes the final decision.</p>
   </div>`;
 }
