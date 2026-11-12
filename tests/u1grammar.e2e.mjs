@@ -68,8 +68,8 @@ assert.ok(await s.locator(".spk").count() + await s.locator("[data-spk]").count(
 assert.equal(await s.locator('textarea[data-ex="g12"][readonly]').count(), 1, "transcript box is read-only");
 await s.screenshot({ path: SHOTS + "/student-grammar.png", fullPage: false });
 // answers: a dropdown, a rewrite, a translation with a typical mistake, a transcript (as Whisper would fill it)
-await s.selectOption('select[data-ex="g2"][data-item="1"]', "Could");
-await s.selectOption('select[data-ex="g9"][data-item="1"]', "must have + past participle");
+await s.selectOption('select[data-ex="g2"][data-item="1"]', "were allowed to");
+await s.selectOption('select[data-ex="g9"][data-item="1"]', "must have done");
 await s.fill('[data-ex="g3"][data-item="5"]', "They could pass the exams.");
 await s.fill('textarea[data-ex="gtr1"][data-item="3"]', "After three attempts Lukas could pass the statistics exam.");
 await s.fill('textarea[data-ex="gtr2"][data-item="2"]', "He mustn't have cheated in the exam: he has always been a very motivated student.");
@@ -77,7 +77,17 @@ await s.evaluate(() => { const ta = document.querySelector('textarea[data-ex="g1
 await s.waitForTimeout(3500);
 const db = await s.evaluate(() => JSON.parse(localStorage.getItem("mock:db")));
 const ans = db["submissions/u1__S1"]?.answers || {};
-assert.equal(ans.g2?.["1"], "Could"); assert.match(ans.gtr1?.["3"] || "", /could pass/); assert.match(ans.g12?.["1"] || "", /must had/);
+assert.equal(ans.g2?.["1"], "were allowed to"); assert.match(ans.gtr1?.["3"] || "", /could pass/); assert.match(ans.g12?.["1"] || "", /must had/);
+
+step("GCSE and A-Level is the last section and works");
+const secs = await s.evaluate(() => [...document.querySelectorAll('.sb-item[href^="#u1/"]')].map((a) => a.getAttribute("href")));
+assert.equal(secs[secs.length - 1], "#u1/exams", "exams is the last section: " + secs.join(", "));
+await s.goto(BASE + "/index.html#u1/exams"); await s.waitForSelector('[data-ex="x7"]');
+assert.equal(await s.locator('select[data-ex="x8"]').count(), 8);
+assert.equal(await s.locator('textarea[data-ex="x14"][readonly]').count(), 1);
+assert.ok(!(await s.textContent("#content")).includes("Testing, testing"), "model article hidden from the student");
+await s.screenshot({ path: SHOTS + "/student-exams.png" });
+await s.goto(BASE + "/index.html#u1/grammar"); await s.waitForSelector('[data-ex="g2"]');
 
 step("Teacher: Answers shown with the student's work on the unit page");
 await t.goto(BASE + "/teacher.html#u1/grammar"); await t.waitForSelector('[data-ex="g2"]');

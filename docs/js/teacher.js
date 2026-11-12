@@ -4,20 +4,20 @@ import {
   auth, db, onAuthStateChanged, signInWithEmailAndPassword, sendPasswordResetEmail, signOut,
   doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, onSnapshot, collection, query, where, orderBy,
   writeBatch, arrayUnion, arrayRemove, serverTimestamp, deleteField,
-} from "./fb.js?v=20261112v";
-import { COURSE_TITLE } from "./firebase-config.js?v=20261112v";
+} from "./fb.js?v=20261113a";
+import { COURSE_TITLE } from "./firebase-config.js?v=20261113a";
 import {
   esc, renderBlocks, renderExercise, exercisesOf, isAuto, isPractice, gradeAuto, buildResult, keyText, norm,
   fmtTime, friendlyError, authFormHTML, wireAuthForm, subId, KIND_LABEL, isTeacherChecked, gradeExercise, wireFlashcards, isManual,
   isCorrect, readInput, doneMap, isTranslation, exerciseNumbers, studentItems, keyForStudents, fmtDate, todayISO, answerLabel, r2, unitNo, unitLabel, wireLang,
-} from "./common.js?v=20261112v";
-import { initShell, renderUnitNav, wireUnitNav } from "./shell.js?v=20261112v";
-import { loadVocab, grammarCheck, vocabProfile, unitVocabulary, modelWordsCheck, feedbackHTML, pairFeedbackHTML, sleep } from "./writing.js?v=20261112v";
-import "./speaking.js?v=20261112v";
-import { isWritingTask, measure, METRICS, toCSV } from "./progress.js?v=20261112v";
-import { analyse, grammarOf, STRUCT, STRUCTURES } from "./grammar.js?v=20261112v";
-import { aiCheck, aiReady, aiSettings, saveAiSettings, endpoint, PROVIDERS, listModels, testAi } from "./ai-check.js?v=20261112v";
-import { FILLERS } from "./transcribe.js?v=20261112v";
+} from "./common.js?v=20261113a";
+import { initShell, renderUnitNav, wireUnitNav } from "./shell.js?v=20261113a";
+import { loadVocab, grammarCheck, vocabProfile, unitVocabulary, modelWordsCheck, feedbackHTML, pairFeedbackHTML, sleep } from "./writing.js?v=20261113a";
+import "./speaking.js?v=20261113a";
+import { isWritingTask, measure, METRICS, toCSV } from "./progress.js?v=20261113a";
+import { analyse, grammarOf, STRUCT, STRUCTURES } from "./grammar.js?v=20261113a";
+import { aiCheck, aiReady, aiSettings, saveAiSettings, endpoint, PROVIDERS, listModels, testAi } from "./ai-check.js?v=20261113a";
+import { FILLERS } from "./transcribe.js?v=20261113a";
 
 const $ = (s) => document.querySelector(s);
 const ls = {
@@ -52,7 +52,7 @@ const TOOLS = [
   { id: "works", icon: "📝", title: "Student work", sub: "Answers, open-answer marking" },
   { id: "tests", icon: "⏱", title: "Tests", sub: "Timed tests: open, watch, check" },
   { id: "stats", icon: "📊", title: "Analytics", sub: "Difficult questions, heat map" },
-  { id: "checker", icon: "🔎", title: "Grammar checker", sub: "LanguageTool or AI, grammar of the module" },
+  { id: "checker", icon: "🔎", title: "Grammar checker", sub: "LanguageTool or AI (Groq), the key" },
   { id: "speaking", icon: "🎙", title: "Speaking progress", sub: "Recordings as text: figures, trends, texts" },
   { id: "writing", icon: "✍", title: "Writing progress", sub: "Translations and texts: figures, trends, texts" },
   { id: "journal", icon: "📅", title: "Attendance", sub: "Lesson dates, present and absent" },
@@ -353,7 +353,7 @@ async function downloadDocx(unitId, ver, btn) {
   try {
     const d = await loadUnitData(unitId);
     if (!d?.content) throw new Error("This unit has no content yet.");
-    const { exportUnitDocx, saveBlob } = await import("./export-docx.js?v=20261112v");
+    const { exportUnitDocx, saveBlob } = await import("./export-docx.js?v=20261113a");
     const teacher = ver === "teacher";
     const sections = d.content.sections.map((s) => ({ ...s, subtitle: (u.sections || []).find((m) => m.id === s.id)?.subtitle || s.subtitle || "" }));
     const blob = await exportUnitDocx({ courseTitle: COURSE_TITLE, unitNum: unitNum(u), unitLabel: uLabel(u), unitTitle: u.title, sections,
@@ -622,6 +622,7 @@ function writingBar(u, ex, g) {
     <span class="sp" style="flex:1"></span>
     <span id="wcheck-progress" class="muted"></span>
     <button class="btn small good" data-act="check-writing" data-unit="${esc(u.id)}" data-ex="${esc(ex.id)}" ${g.openUnits.includes(u.id) ? "" : "disabled"}>${done ? "Check again" : ex.transcript ? "Check the speaking now" : "Check the writing now"}</button>
+    <span class="pill ${aiReady() ? "on" : "off"}" title="${aiReady() ? `The texts are checked by AI: ${esc(endpoint().name)} · ${esc(endpoint().model)}, with the course rules` : "No AI key in this browser: the texts are checked by LanguageTool and the course rules. Add the key in Teaching tools, Grammar checker"}">${aiReady() ? `AI · ${esc(endpoint().name)}` : "LanguageTool"}</span>
     ${done ? `<button class="btn small danger" data-act="hide-writing" data-unit="${esc(u.id)}" data-ex="${esc(ex.id)}">Hide feedback</button>` : ""}
   </div>`;
 }
