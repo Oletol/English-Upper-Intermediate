@@ -16,6 +16,9 @@ export const STRUCTURES = [
   { id: "modal_offer", label: "Offers: Shall / Can I …? Would you like me to …?", eg: "Shall I send you the data? Would you like me to help?" },
   { id: "deduction_present", label: "Deductions about the present: must / can't / may + be (doing)", eg: "She must be working. It can't be true. He may be ill." },
   { id: "deduction_past", label: "Deductions about the past: must / can't / may + have done", eg: "He must have forgotten. She can't have seen it. They may not have known." },
+  { id: "modal_perfect", label: "Criticism, regret, unnecessary actions: should / ought to / needn't + have done", eg: "We should have piloted it. You needn't have printed it." },
+  { id: "probability", label: "Probability: be bound / likely / unlikely to, there's a good chance", eg: "The reviewers are bound to ask. It is likely to rain." },
+  { id: "polite_indirect", label: "Very polite requests and suggestions: I was wondering if, I'd be grateful if, might as well, had better", eg: "I was wondering if you could help. We might as well start." },
   // the gerund
   { id: "gerund_prep", label: "Gerund after a preposition", eg: "interested in learning, look forward to seeing" },
   { id: "gerund_verb", label: "Verb + gerund", eg: "enjoy swimming, avoid making, can't help laughing" },
@@ -122,6 +125,9 @@ const PREP_RE = `(?:${alt(PREPS)}|${TO_PREP.join("|")})`;
 const DED = `(?:must|can't|cannot|couldn't|could|may|might|mustn't)`;
 const OFFER_V = "help|carry|get|give|bring|take|show|make|open|close|do|send|book|fetch|pour|lend|check|explain|organise|organize|print|call|drive";
 const PATTERNS = [
+  ["modal_perfect", R(`\\b(?:should|shouldn't|ought\\s+to|ought\\s+not\\s+to|oughtn't\\s+to|needn't|need\\s+not)\\s+(?:not\\s+)?have\\s+(?:been\\s+)?${V3}\\b`)],
+  ["probability", R(`\\b(?:am|is|are|was|were|be|been|'s|'re|isn't|aren't)\\s+(?:not\\s+)?(?:very\\s+|quite\\s+|highly\\s+)?(?:bound|likely|unlikely|certain|sure)\\s+to\\s+[a-z]+\\b|\\bthere(?:'s|\\s+is)\\s+(?:a\\s+good|a\\s+strong|every|little|no)\\s+chance\\b`)],
+  ["polite_indirect", R(`\\bI\\s+(?:was|am)\\s+wondering\\s+(?:if|whether)\\b|\\b(?:I|we)(?:\\s+would|'d)\\s+be\\s+(?:very\\s+)?grateful\\s+if\\b|\\bwould\\s+it\\s+be\\s+(?:at\\s+all\\s+)?possible\\b|\\b(?:might|may)\\s+(?:just\\s+)?as\\s+well\\s+[a-z]+\\b|\\b(?:had|'d)\\s+better\\s+(?:not\\s+)?[a-z]+\\b`)],
   ["deduction_past", R(`\\b${DED}\\s+(?:not\\s+)?have\\s+(?:been\\s+[a-z]+ing|been|${V3})\\b`)],
   ["deduction_present", R(`\\b(?:must|can't|cannot|couldn't|may|might|could)\\s+(?:not\\s+)?be\\s+(?:[a-z]{2,}ing|[a-z]+)\\b`)],
   ["modal_offer", R(`\\bshall\\s+I\\s+[a-z]+\\b|\\bwould\\s+you\\s+like\\s+me\\s+to\\s+[a-z]+\\b|\\b(?:can|could|may)\\s+I\\s+(?:${OFFER_V})\\s+(?:you|it|them|your)\\b`)],
@@ -230,6 +236,23 @@ const ERR_MODAL = [
   { rule: "MIND_IF_WILL", re: R(`\\bmind\\s+if\\s+(I|we)\\s+will\\s+([a-z]+)\\b`), ok: () => true,
     msg: () => "After “Would / Do you mind if …” use the present or the past simple, not “will”.", fix: (m) => `mind if ${m[1]} ${m[2]}` },
 ];
+ERR_MODAL.push(
+  { rule: "NEEDNT_TO_HAVE", re: R(`\\b(needn't|need\\s+not)\\s+to\\s+have\\b`), ok: () => true,
+    msg: () => "Say “needn’t have done”, without “to”.", fix: (m) => `${m[1]} have` },
+  { rule: "SHOULD_HAVE_TO", re: R(`\\b(should|shouldn't|must|might|may|could)\\s+have\\s+to\\s+([a-z]+)\\b`), ok: (m) => isMB(m[2]),
+    msg: (m) => `For criticism or regret about the past say “${m[1]} have + past participle” (${m[1]} have ${pp(m[2])}).`, fix: (m) => `${m[1]} have ${pp(m[2])}` },
+  { rule: "BOUND_TO_ING", re: R(`\\b(bound|likely|unlikely|certain|sure)\\s+to\\s+([a-z]{2,}ing)\\b`), ok: (m) => !NOT_ING.has(m[2].toLowerCase()) && isMB(m[2].replace(/ing$/i, "")) || isMB(m[2].replace(/ing$/i, "e")),
+    msg: (m) => `“${m[1]} to” is followed by the infinitive: ${m[1]} to ${isMB(m[2].replace(/ing$/i, "")) ? m[2].replace(/ing$/i, "") : m[2].replace(/ing$/i, "e")}.`,
+    fix: (m) => `${m[1]} to ${isMB(m[2].replace(/ing$/i, "")) ? m[2].replace(/ing$/i, "") : m[2].replace(/ing$/i, "e")}` },
+  { rule: "HAD_BETTER_TO", re: R(`\\b(had|'d)\\s+better\\s+(not\\s+)?to\\s+([a-z]+)\\b`), ok: () => true,
+    msg: () => "After “had better” use the infinitive without “to”.", fix: (m) => `${m[1]} better ${m[2] || ""}${m[3]}` },
+  { rule: "SUCCEED_TO", re: R(`\\b(succeed|succeeds|succeeded)\\s+to\\s+([a-z]+)\\b`), ok: (m) => isMB(m[2]),
+    msg: (m) => `Say “${m[1]} in + -ing” or “managed to ${m[2]}”.`, fix: (m) => `${m[1]} in ${ingOf(m[2])}` },
+  { rule: "AS_GOOD", re: R(`\\b(might|may)\\s+as\\s+good\\b`), ok: () => true,
+    msg: () => "The phrase is “might / may as well”.", fix: (m) => `${m[1]} as well` },
+  { rule: "GRATEFUL_THAT", re: R(`\\b(grateful)\\s+that\\s+you\\s+(could|would|will|can)\\b`), ok: () => true,
+    msg: () => "Say “I would be grateful if you could…”.", fix: () => "grateful if you could" },
+);
 const ERR = [...ERR_MODAL,
   { rule: "GER_AFTER_VERB", re: R(`\\b(${alt(GERUND_VERBS)})\\s+(?:not\\s+)?to\\s+([a-z]+)\\b`), ok: (m) => isBase(m[2]),
     msg: (m) => `After “${m[1].replace(/\s+/g, " ")}” use the -ing form, not the infinitive.`, fix: (m) => `${m[1].replace(/\s+/g, " ")} ${ingOf(m[2])}` },
@@ -269,13 +292,13 @@ const poss = (o) => ({ me: "my", you: "your", him: "his", her: "her", us: "our",
 const baseOf = (v) => { const w = String(v); return /(?:ss|sh|ch|x|z|o)es$/i.test(w) ? w.slice(0, -2) : /[^aeiou]ies$/i.test(w) ? w.slice(0, -3) + "y" : /[^s]s$/i.test(w) ? w.slice(0, -1) : w; };
 const ADJ_PREP = { fond: "of", tired: "of", capable: "of", interested: "in", keen: "on", good: "at", bad: "at", proud: "of", responsible: "for", famous: "for",
   guilty: "of", sick: "of", aware: "of", ashamed: "of", excited: "about", worried: "about", nervous: "about", successful: "in" };
-const pp = (v) => ({ cut: "cut", feed: "fed" }[v.toLowerCase()] || (/e$/.test(v) ? v + "d" : /[^aeiou]y$/.test(v) ? v.slice(0, -1) + "ied" : v + "ed"));
+const pp = (v) => ({ cut: "cut", feed: "fed", submit: "submitted", admit: "admitted", permit: "permitted", commit: "committed", regret: "regretted", prefer: "preferred", refer: "referred", plan: "planned", stop: "stopped", drop: "dropped", occur: "occurred", ...Object.fromEntries(Object.entries(V2_ONLY).map(([k, v]) => [k, v])), go: "gone", see: "seen", do: "done", take: "taken", write: "written", give: "given", begin: "begun", know: "known", speak: "spoken", break: "broken", forget: "forgotten", choose: "chosen", eat: "eaten", send: "sent", spend: "spent", find: "found", get: "got", make: "made", tell: "told", read: "read", leave: "left", meet: "met", teach: "taught", bring: "brought", buy: "bought", think: "thought", hold: "held", lose: "lost", pay: "paid", put: "put", set: "set", say: "said", sit: "sat" }[v.toLowerCase()] || (/e$/.test(v) ? v + "d" : /[^aeiou]y$/.test(v) ? v.slice(0, -1) + "ied" : v + "ed"));
 
 // ------------------------------------------------------------------ the analysis
 // want: the ids of the module's structures (empty: all of them). Returns
 // { found: [{id, label, quote, offset, length}], counts: {id: n}, used: [id], missing: [id], errors: [issue …] }
 export function analyse(text, want = []) {
-  text = String(text || "");
+  text = String(text || "").replace(/[’‘]/g, "'");   // typographic apostrophes (same length, so the positions do not change)
   const found = [];
   const taken = [];          // parts of the text already given to a structure (the first, more specific pattern wins)
   for (const [id, re] of PATTERNS) {

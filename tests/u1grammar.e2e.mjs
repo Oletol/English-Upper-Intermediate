@@ -13,12 +13,17 @@ const browser = await chromium.launch();
 const ctx = await browser.newContext({ viewport: { width: 1360, height: 950 } });
 await ctx.route("**/js/fb.js*", (r) => r.fulfill({ contentType: "text/javascript", body: mock }));
 const cors = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "*" };
-let aiCalls = 0, lastPrompt = "";
+let aiCalls = 0, lastPrompt = ""; const models = [];
 await ctx.route("https://api.languagetool.org/**", (r) => r.fulfill({ contentType: "application/json", headers: cors, body: '{"matches":[]}' }));
 await ctx.route("https://api.groq.com/**", async (r) => {
   if (r.request().method() === "OPTIONS") return r.fulfill({ status: 204, headers: cors });
   aiCalls++;
-  const user = JSON.parse(r.request().postData()).messages.at(-1).content; lastPrompt = user;
+  const body = JSON.parse(r.request().postData());
+  models.push(body.model + (body.response_format ? "+json" : ""));
+  // the main model fails as gpt-oss sometimes does on Groq: JSON validation error, then an empty answer
+  if (/gpt-oss/.test(body.model) && body.response_format) return r.fulfill({ status: 400, contentType: "application/json", headers: cors, body: '{"error":{"message":"Failed to generate JSON. Please adjust your prompt.","type":"invalid_request_error","code":"json_validate_failed"}}' });
+  if (/gpt-oss/.test(body.model)) return r.fulfill({ contentType: "application/json", headers: cors, body: JSON.stringify({ choices: [{ message: { content: "" }, finish_reason: "length" }] }) });
+  const user = body.messages.at(-1).content; lastPrompt = user;
   const items = JSON.parse(user.match(/STUDENT'S ANSWERS \(JSON, one text per item\):\n(.*)/)[1]);
   const out = { items: {} };
   for (const [id, text] of Object.entries(items)) out.items[id] = {
@@ -96,20 +101,32 @@ await t.locator('[data-act="check-writing"][data-ex="gtr1"]').click();
 await t.waitForFunction(() => JSON.parse(localStorage.getItem("mock:db"))["exerciseResults/u1__S1"]?.feedback?.gtr1, null, { timeout: 20000 });
 const fb1 = (await t.evaluate(() => JSON.parse(localStorage.getItem("mock:db"))))["exerciseResults/u1__S1"].feedback.gtr1["3"];
 assert.ok(fb1.issues.some((i) => i.rule === "COULD_SINGLE_PAST"), "rule: could for one success");
-assert.ok(fb1.translation && fb1.modelWords, "model words compared");
+assert.ok(fb1.translation && !fb1.modelWords, "translation; the model words are never stored for the student");
 assert.ok(fb1.target.some((x) => x.id === "modal_ability"), "structure found");
 await t.locator('[data-act="check-writing"][data-ex="gtr2"]').click();
 await t.waitForFunction(() => JSON.parse(localStorage.getItem("mock:db"))["exerciseResults/u1__S1"]?.feedback?.gtr2, null, { timeout: 20000 });
 const fb2 = (await t.evaluate(() => JSON.parse(localStorage.getItem("mock:db"))))["exerciseResults/u1__S1"].feedback.gtr2["2"];
 assert.ok(fb2.issues.some((i) => i.rule === "MUSTNT_HAVE"), "rule: mustn't have");
 
-step("Teacher: AI key (Groq, mocked) – Check the speaking now");
-await t.evaluate(() => localStorage.setItem("t:aiCheck", JSON.stringify({ provider: "groq", key: "gsk_test", on: true })));
-await t.reload(); await t.waitForSelector('[data-ex="g12"]');
+step("Teacher: g16 (whole sentences) – checked, no model sentence for the student");
+await t.locator('[data-act="check-ex"][data-ex="g16"]').first().click(); await t.waitForTimeout(1500);
+const r16 = (await t.evaluate(() => JSON.parse(localStorage.getItem("mock:db"))))["exerciseResults/u1__S1"]?.items?.g16 || {};
+assert.ok(Object.keys(r16).length && Object.values(r16).every((x) => x.correct === ""), "g16 keys hidden");
+
+step("Teacher: pasting a Groq key switches the AI check on");
+await t.goto(BASE + "/teacher.html#tools/checker"); await t.waitForSelector('input[name="ai-on"][value="1"]');
+await t.check('input[name="ai-on"][value="1"]'); await t.waitForSelector("#ai-key", { state: "visible" });
+await t.fill("#ai-key", "gsk_test"); await t.locator("#ai-key").dispatchEvent("change");
+await t.waitForTimeout(300);
+assert.equal(JSON.parse(await t.evaluate(() => localStorage.getItem("t:aiCheck"))).on, true, "AI on after pasting the key");
+
+step("Teacher: AI key (Groq, mocked; the main model fails, the fallback works) – Check the speaking now");
+await t.goto(BASE + "/teacher.html#u1/grammar"); await t.reload(); await t.waitForSelector('[data-ex="g12"]');
 await t.locator('[data-act="check-writing"][data-ex="g12"]').click();
 await t.waitForFunction(() => JSON.parse(localStorage.getItem("mock:db"))["exerciseResults/u1__S1"]?.feedback?.g12, null, { timeout: 20000 });
 const fb3 = (await t.evaluate(() => JSON.parse(localStorage.getItem("mock:db"))))["exerciseResults/u1__S1"].feedback.g12["1"];
 assert.equal(fb3.engine, "ai"); assert.ok(aiCalls >= 1);
+assert.ok(models.some((m) => /llama-3.3/.test(m)), "fallback model used: " + models.join(", "));
 assert.ok(fb3.issues.some((i) => i.rule === "MODAL_HAD"), "course rule added to the AI feedback");
 assert.match(lastPrompt, /Deductions about the past/); assert.match(lastPrompt, /postgraduate|B2/);
 const dbAll = JSON.stringify(await t.evaluate(() => localStorage.getItem("mock:db")));
@@ -121,8 +138,14 @@ await s.waitForSelector(".wfb");
 await s.locator('.wfb').first().scrollIntoViewIfNeeded();
 await s.screenshot({ path: SHOTS + "/student-feedback.png" });
 const st = await s.textContent("#content");
-assert.match(st, /Grammar of the module in your/); assert.match(st, /Unit words in this sentence/);
+assert.match(st, /Grammar of the module in your/);
+assert.ok(!/Teacher only|Not found in your translation|Model answer/.test(st), "no model answers for the student");
 assert.ok(!/Estimated level/.test(st), "no AI level for the student");
+
+step("Teacher sees the model words in the student's translation");
+await t.goto(BASE + "/teacher.html#u1/grammar"); await t.waitForSelector(".viewas-bar select");
+await t.selectOption(".viewas-bar select", "S1"); await t.waitForSelector(".viewas-bar.on");
+await t.waitForSelector("text=Teacher only");
 
 step("Speaking progress and the Grammar checker page");
 await t.goto(BASE + "/teacher.html#tools/speaking"); await t.waitForSelector("#view .prog-ctl, #view .box", { timeout: 15000 });

@@ -4,20 +4,20 @@ import {
   auth, db, onAuthStateChanged, signInWithEmailAndPassword, sendPasswordResetEmail, signOut,
   doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, onSnapshot, collection, query, where, orderBy,
   writeBatch, arrayUnion, arrayRemove, serverTimestamp, deleteField,
-} from "./fb.js?v=20261112u";
-import { COURSE_TITLE } from "./firebase-config.js?v=20261112u";
+} from "./fb.js?v=20261112v";
+import { COURSE_TITLE } from "./firebase-config.js?v=20261112v";
 import {
   esc, renderBlocks, renderExercise, exercisesOf, isAuto, isPractice, gradeAuto, buildResult, keyText, norm,
   fmtTime, friendlyError, authFormHTML, wireAuthForm, subId, KIND_LABEL, isTeacherChecked, gradeExercise, wireFlashcards, isManual,
   isCorrect, readInput, doneMap, isTranslation, exerciseNumbers, studentItems, keyForStudents, fmtDate, todayISO, answerLabel, r2, unitNo, unitLabel, wireLang,
-} from "./common.js?v=20261112u";
-import { initShell, renderUnitNav, wireUnitNav } from "./shell.js?v=20261112u";
-import { loadVocab, grammarCheck, vocabProfile, unitVocabulary, modelWordsCheck, feedbackHTML, pairFeedbackHTML, sleep } from "./writing.js?v=20261112u";
-import "./speaking.js?v=20261112u";
-import { isWritingTask, measure, METRICS, toCSV } from "./progress.js?v=20261112u";
-import { analyse, grammarOf, STRUCT, STRUCTURES } from "./grammar.js?v=20261112u";
-import { aiCheck, aiReady, aiSettings, saveAiSettings, endpoint, PROVIDERS, listModels, testAi } from "./ai-check.js?v=20261112u";
-import { FILLERS } from "./transcribe.js?v=20261112u";
+} from "./common.js?v=20261112v";
+import { initShell, renderUnitNav, wireUnitNav } from "./shell.js?v=20261112v";
+import { loadVocab, grammarCheck, vocabProfile, unitVocabulary, modelWordsCheck, feedbackHTML, pairFeedbackHTML, sleep } from "./writing.js?v=20261112v";
+import "./speaking.js?v=20261112v";
+import { isWritingTask, measure, METRICS, toCSV } from "./progress.js?v=20261112v";
+import { analyse, grammarOf, STRUCT, STRUCTURES } from "./grammar.js?v=20261112v";
+import { aiCheck, aiReady, aiSettings, saveAiSettings, endpoint, PROVIDERS, listModels, testAi } from "./ai-check.js?v=20261112v";
+import { FILLERS } from "./transcribe.js?v=20261112v";
 
 const $ = (s) => document.querySelector(s);
 const ls = {
@@ -293,7 +293,7 @@ function viewUnit(r) {
           manual: vres?.manual?.[ex.id],
           tag: done ? (isPractice(ex) ? "Checked by the student ✓" : "Done ✓") : vs && Object.values(ans).some((v) => String(v).trim()) ? "Started, not marked Done" : "",
           before: g ? toolsBar(u, ex, g, st) : "",
-          itemExtra: fbx ? (itemId) => feedbackHTML(fbx[itemId], { checkedAt: fmtTime(vexr.feedbackAt?.[ex.id]), teacher: true }) : null,
+          itemExtra: fbx ? (itemId) => feedbackHTML(fbx[itemId], { checkedAt: fmtTime(vexr.feedbackAt?.[ex.id]), teacher: true, model: d.keys?.[ex.id]?.[itemId], phrases: unitVocabulary(d.content) }) : null,
           after: (ex.pair && fbx?._pair ? pairFeedbackHTML(fbx._pair, { checkedAt: fmtTime(vexr.feedbackAt?.[ex.id]), teacher: true }) : "") + (st.items ? `<div class="mist" data-mi="${esc(ex.id)}" ${T.mistOpen.has(ex.id) ? "" : "hidden"}>${mistakesHTML(ex, st)}</div>` : ""),
         };
       }
@@ -353,7 +353,7 @@ async function downloadDocx(unitId, ver, btn) {
   try {
     const d = await loadUnitData(unitId);
     if (!d?.content) throw new Error("This unit has no content yet.");
-    const { exportUnitDocx, saveBlob } = await import("./export-docx.js?v=20261112u");
+    const { exportUnitDocx, saveBlob } = await import("./export-docx.js?v=20261112v");
     const teacher = ver === "teacher";
     const sections = d.content.sections.map((s) => ({ ...s, subtitle: (u.sections || []).find((m) => m.id === s.id)?.subtitle || s.subtitle || "" }));
     const blob = await exportUnitDocx({ courseTitle: COURSE_TITLE, unitNum: unitNum(u), unitLabel: uLabel(u), unitTitle: u.title, sections,
@@ -659,7 +659,7 @@ async function checkWriting(gid, unitId, exId) {
         if (it.plain) continue;                     // a partner's name: nothing to check
         if (!res.items[it.id]) continue;
         fb[it.id] = res.items[it.id];
-        if (tr) { fb[it.id].translation = true; if (exKeys[it.id]) fb[it.id].modelWords = modelWordsCheck(fb[it.id].text, [].concat(exKeys[it.id]).join(" "), unitVocabulary(content)); }
+        if (tr) fb[it.id].translation = true;   // the comparison with the model translation is shown only in the teacher's view, never stored for students
         // a transcribed speaking task: the measurements of the speech (length, speed, pauses) go with the feedback
         if (ex.transcript && it === ex.items[0] && s.answers?._speech?.[exId]) { try { fb[it.id].speech = JSON.parse(s.answers._speech[exId]); } catch {} }
       }
@@ -684,7 +684,7 @@ async function checkWriting(gid, unitId, exId) {
     }
     await updateDoc(doc(db, "groups", gid), { [`feedbackEx.${unitId}`]: arrayUnion(exId) });
     const pairNote = ex.pair ? ` ${copied} ${copied === 1 ? "copy" : "copies"} sent to partners${unmatched ? `; ${unmatched} partner ${unmatched === 1 ? "name was" : "names were"} not matched – see Speaking progress` : ""}.` : "";
-    toast((aiFailed ? `The AI check did not work for ${aiFailed} of ${subs.length} (LanguageTool was used instead). ` : "")
+    toast((aiFailed ? `The AI check did not work for ${aiFailed} of ${subs.length} (LanguageTool was used instead). Reason: ${T.lastAiError || "unknown"}. ` : "")
       + (ltFailed ? `Done. The grammar check was not available for ${ltFailed} of ${subs.length}; the vocabulary and the grammar of the module were checked.` : `Done: ${subs.length} texts checked. Students can see the feedback now.`) + pairNote, 9000);
   });
 }
@@ -779,7 +779,11 @@ document.addEventListener("change", (e) => {
   if (e.target.closest?.(".ai-box") && /^(ai-|try-unit|try-kind)/.test(e.target.id || e.target.name || "")) {
     if (e.target.id === "try-unit") T.tryUnit = e.target.value;
     if (e.target.id === "try-kind") T.tryKind = e.target.value;
-    if (/^ai-/.test(e.target.id || e.target.name)) saveAiSettings(readAiForm());
+    if (/^ai-/.test(e.target.id || e.target.name)) {
+      const v = readAiForm();
+      if (e.target.id === "ai-key" && v.key) v.on = true;     // a pasted key switches the AI check on
+      saveAiSettings(v);
+    }
     T.tryText = $("#try-text")?.value || T.tryText;
     render(true);
   }
@@ -790,7 +794,7 @@ async function aiButton(act) {
   if (!s.key) { if (st) st.textContent = "Paste the key first."; return; }
   if (st) st.textContent = "Asking…";
   try {
-    if (act === "ai-test") { await testAi(s); if (st) st.innerHTML = `<b style="color:var(--ok)">✓ The key works.</b> ${esc(endpoint(s).name)} · ${esc(endpoint(s).model)}`; }
+    if (act === "ai-test") { await testAi(s); saveAiSettings({ ...s, on: true }); render(true); const st2 = $("#ai-status"); if (st2) st2.innerHTML = `<b style="color:var(--ok)">✓ The key works.</b> ${esc(endpoint(s).name)} · ${esc(endpoint(s).model)}`; }
     else {
       const list = await listModels(s);
       const dl = $("#ai-models"); if (dl) dl.innerHTML = list.map((m) => `<option value="${esc(m)}">`).join("");
@@ -1435,7 +1439,7 @@ function studentDetail(uid, data) {
       factor: f[ex.id],
       manual: r?.manual?.[ex.id],
       grading: isManual(ex) && !isPractice(ex),
-      itemExtra: T.exr?.[uid]?.feedback?.[ex.id] ? (itemId) => feedbackHTML(T.exr[uid].feedback[ex.id][itemId], { checkedAt: fmtTime(T.exr[uid].feedbackAt?.[ex.id]), teacher: true }) : null,
+      itemExtra: T.exr?.[uid]?.feedback?.[ex.id] ? (itemId) => feedbackHTML(T.exr[uid].feedback[ex.id][itemId], { checkedAt: fmtTime(T.exr[uid].feedbackAt?.[ex.id]), teacher: true, model: data.keys?.[ex.id]?.[itemId], phrases: unitVocabulary(data.content) }) : null,
     })).join("");
   }).join("");
   // switching between students without going back to the table

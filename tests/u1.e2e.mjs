@@ -192,8 +192,8 @@ await t.click('[data-act="check-writing"][data-ex="vtr"]');
 await s.waitForSelector("#ex-vtr .wfb", { timeout: 20000 });
 const tfb = await s.textContent("#ex-vtr");
 assert.ok(tfb.includes("has gone"), "grammar feedback in the translation");
-assert.ok(/Unit words in this sentence \(\d+ of \d+\)/.test(tfb), "unit words compared with the model");
-assert.ok(tfb.includes("Not found in your translation") && tfb.includes("opportunity"), "the missing unit word is named");
+// the model translation is never shown to the student (not even its unit words); the teacher sees the comparison
+assert.ok(!/Unit words of the model|Not found in your translation/.test(tfb), "nothing from the model for the student");
 assert.ok(/B1 \d+%/.test(tfb), "CEFR levels shown");
 await s.locator("#ex-vtr .wfb").first().screenshot({ path: `${SHOTS}/20-translation-feedback.png` });
 await s.locator("#ex-v2").screenshot({ path: `${SHOTS}/15-v2-checked.png` });

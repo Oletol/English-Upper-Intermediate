@@ -2,9 +2,9 @@
 // Octanove C1–C2, Google 10,000 frequency list as a fallback) and use of the unit's vocabulary.
 // The check runs in the teacher's browser when the teacher clicks the button; the result is
 // saved for each student in exerciseResults and shown under their text.
-import { esc } from "./common.js?v=20261112u";
-import { metricsLine } from "./transcribe.js?v=20261112u";
-import { STRUCT } from "./grammar.js?v=20261112u";
+import { esc } from "./common.js?v=20261112v";
+import { metricsLine } from "./transcribe.js?v=20261112v";
+import { STRUCT } from "./grammar.js?v=20261112v";
 
 const LT_URL = "https://api.languagetool.org/v2/check";
 const LT_LANG = "en-GB";
@@ -145,7 +145,7 @@ export function modelWordsCheck(text, model, unitPhrases = []) {
 }
 function modelWordsHTML(t) {
   if (!t || !t.want?.length) return "";
-  return `<p class="wfb-line"><b>Unit words in this sentence (${t.used.length} of ${t.want.length}):</b> ${t.want.map((p) => t.used.includes(p) ? `<span class="tw ok">${esc(p)}</span>` : `<span class="tw miss">${esc(p)}</span>`).join(" ")}</p>
+  return `<p class="wfb-line"><b>Teacher only · unit words of the model translation (${t.used.length} of ${t.want.length}):</b> ${t.want.map((p) => t.used.includes(p) ? `<span class="tw ok">${esc(p)}</span>` : `<span class="tw miss">${esc(p)}</span>`).join(" ")}</p>
     ${t.missing.length ? `<p class="wfb-line muted">Not found in your translation: ${t.missing.map(esc).join(", ")}. A good synonym is also fine: your teacher decides.</p>` : ""}`;
 }
 
@@ -195,7 +195,7 @@ function targetHTML(fb) {
     ${missing.length && rows ? `<p class="wfb-line muted">Not used yet: ${missing.map((id) => esc(STRUCT[id].label)).join(", ")}</p>` : ""}</div>`;
 }
 
-export function feedbackHTML(fb, { checkedAt, teacher = false } = {}) {
+export function feedbackHTML(fb, { checkedAt, teacher = false, model = null, phrases = null } = {}) {
   if (!fb) return "";
   const text = String(fb.text || "");
   // highlighted text
@@ -219,7 +219,7 @@ export function feedbackHTML(fb, { checkedAt, teacher = false } = {}) {
     ${fb.speech ? `<p class="wfb-line"><b>How you spoke:</b> ${esc(metricsLine(fb.speech))}</p><p class="wfb-line muted">The text was written by a computer from your recording. It can contain the computer’s mistakes, and it sometimes corrects a mistake you made, so listen to your recording too.</p>` : ""}
     <div class="wfb-text">${html}</div>
     ${issues ? `<ul class="wfb-issues">${issues}</ul>` : fb.grammarError ? "" : `<p class="wfb-ok">No grammar ${fb.speech || fb.spoken ? "" : "or spelling "}problems were found.</p>`}
-    ${modelWordsHTML(fb.modelWords)}
+    ${teacher && fb.translation && model && phrases ? modelWordsHTML(modelWordsCheck(fb.text, [].concat(model).join(" "), phrases)) : ""}
     ${targetHTML(fb)}
     ${v ? `<div class="wfb-v"><span class="muted">${v.words} words</span> ${bars}</div>
       ${v.high.length ? `<p class="wfb-line"><b>Words at B2 and above:</b> ${v.high.map((x) => `${esc(x.w)} <small>${x.l}</small>`).join(", ")}</p>` : ""}

@@ -29,28 +29,63 @@ export function endpoint(s = aiSettings()) {
   return { base: (s.base || p.base || "").replace(/\/+$/, ""), model: s.model || p.model, delay: p.delay, name: p.name };
 }
 
-async function call(s, messages, json = true) {
-  const { base, model } = endpoint(s);
+// Groq's free models: if the chosen model fails (busy, too large a request, an empty or broken answer), the next one is tried
+const FALLBACK = { groq: ["llama-3.3-70b-versatile", "meta-llama/llama-4-scout-17b-16e-instruct"] };
+
+async function callOnce(s, model, messages, json) {
+  const { base } = endpoint(s);
   const body = { model, messages, temperature: 0 };
+  if (s.provider === "groq") body.max_completion_tokens = 6000; else body.max_tokens = 6000;
+  // gpt-oss models think before they answer: a short reasoning leaves room for the answer and is much faster
+  if (/gpt-oss/i.test(model)) body.reasoning_effort = "low";
   if (json) body.response_format = { type: "json_object" };
   for (let attempt = 0; attempt < 3; attempt++) {
-    const r = await fetch(base + "/chat/completions", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: "Bearer " + s.key },
-      body: JSON.stringify(body),
-    });
+    let r;
+    try {
+      r = await fetch(base + "/chat/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: "Bearer " + s.key },
+        body: JSON.stringify(body),
+      });
+    } catch (e) { throw new Error(`${endpoint(s).name} could not be reached (${e.message}). Check the internet connection.`); }
     if (r.status === 429 && attempt < 2) {           // too many requests: wait as the service asks, then try again
       const wait = Math.min(60, Number(r.headers.get("retry-after")) || 20);
       await new Promise((res) => setTimeout(res, wait * 1000));
       continue;
     }
     const t = await r.text();
-    if (r.status === 400 && json && /response_format|json/i.test(t)) return call(s, messages, false);   // the model cannot promise JSON
+    if (r.status === 400 && json && /response_format|json/i.test(t)) return callOnce(s, model, messages, false);   // the model could not keep to JSON
+    if (r.status === 401 || r.status === 403) throw Object.assign(new Error(`${endpoint(s).name}: the key is not valid (${r.status}). Paste the key again or create a new one.`), { fatal: true });
     if (!r.ok) throw new Error(`${endpoint(s).name} answered ${r.status}: ${t.slice(0, 200)}`);
-    const d = JSON.parse(t);
-    return d.choices?.[0]?.message?.content || "";
+    let d;
+    try { d = JSON.parse(t); } catch { throw new Error(`${endpoint(s).name} sent an answer that could not be read.`); }
+    const out = d.choices?.[0]?.message?.content || "";
+    if (!out.trim()) {
+      if (json) return callOnce(s, model, messages, false);
+      throw new Error(`${endpoint(s).name} (${model}) sent an empty answer${d.choices?.[0]?.finish_reason ? ` (${d.choices[0].finish_reason})` : ""}.`);
+    }
+    return out;
   }
   throw new Error("Too many requests. Please wait a minute and try again.");
+}
+
+// check: the answer must be usable (e.g. parse as JSON); otherwise the next model is tried
+async function call(s, messages, json = true, check = null) {
+  const first = endpoint(s).model;
+  const models = [first, ...(FALLBACK[s.provider] || []).filter((m) => m !== first)];
+  let last;
+  for (const model of models) {
+    try {
+      const out = await callOnce(s, model, messages, json);
+      if (check) check(out);
+      return out;
+    } catch (e) {
+      last = e;
+      console.warn("AI check", model, e.message);
+      if (e.fatal) break;
+    }
+  }
+  throw last || new Error("The AI check did not answer.");
 }
 
 export async function listModels(s) {
@@ -110,9 +145,11 @@ export async function aiCheck(texts, { task = "", grammar = [], speaking = false
 - "level": the CEFR level (A1, A2, B1, B2, C1, C2) this text shows in grammar and vocabulary – an estimate.
 Answer with JSON only, exactly in this form: {"items": {"<item id>": {"errors": [], "target": [], "comment": "", "level": ""}}}`,
   ].join("\n\n");
-  const raw = await call(settings, [{ role: "system", content: system }, { role: "user", content: user }]);
   let d;
-  try { d = parseJSON(raw); } catch { throw new Error("The AI did not answer in the expected form. Please try again."); }
+  await call(settings, [{ role: "system", content: system }, { role: "user", content: user }], true, (raw) => {
+    try { d = parseJSON(raw); } catch { throw new Error("The AI did not answer in the expected form."); }
+    if (!d || typeof d !== "object" || !d.items) throw new Error("The AI answer has no results for the texts.");
+  });
   const out = {};
   const known = new Set(grammar.map((g) => g.id));
   for (const [id, text] of Object.entries(items)) {

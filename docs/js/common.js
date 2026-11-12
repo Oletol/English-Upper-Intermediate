@@ -1,6 +1,6 @@
 // Общие функции: отрисовка упражнений, автопроверка, подсчёт баллов.
 // Используются и студенческой, и преподавательской страницей.
-import { metricsLine } from "./transcribe.js?v=20261112u";
+import { metricsLine } from "./transcribe.js?v=20261112v";
 
 export const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -193,11 +193,17 @@ export const isRewrite = (ex) => ex?.kind === "open" || isTranslation(ex || {}) 
 export function keyForStudents(ex) {
   if (ex?.showKey === true) return true;
   if (ex?.showKey === false) return false;
-  return ["gap", "mcq", "match"].includes(ex?.kind) && !isRewrite(ex);
+  if (!["gap", "mcq", "match"].includes(ex?.kind) || isRewrite(ex)) return false;
+  // whole sentences (a wide answer field) are model answers too: students never see them
+  if (ex.wide || (ex.items || []).some((it) => it.wide)) return false;
+  return true;
 }
 // remove the correct answers from a checked exercise ({itemId: {given, ok, correct}}) when the students may not see them
 export function studentItems(ex, items, showCorrect = true) {
-  if (!items || (showCorrect && keyForStudents(ex))) return items;
+  // a single long key (six words or more) is a model sentence: it is hidden even where single words are shown
+  if (items && showCorrect && keyForStudents(ex))
+    return Object.fromEntries(Object.entries(items).map(([id, r]) => [id, String(r?.correct || "").trim().split(/\s+/).length >= 6 ? { ...(r || {}), correct: "" } : r]));
+  if (!items) return items;
   // written as "" (not deleted): exerciseResults are saved with merge, so a key from an earlier check would otherwise stay
   return Object.fromEntries(Object.entries(items).map(([id, r]) => [id, { ...(r || {}), correct: "" }]));
 }
