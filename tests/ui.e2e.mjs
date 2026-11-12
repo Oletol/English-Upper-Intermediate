@@ -93,7 +93,7 @@ await s1.fill("[name=password]", "pass123");
 await s1.fill("[name=group]", "pa-21");
 await s1.click("#auth-submit");
 await s1.waitForSelector("text=No units are open yet");
-assert.equal(await s1.locator(".sb-item").count(), 0);
+assert.equal(await s1.locator("#unit-nav .sb-item").count(), 0);
 assert.equal(await s1.locator(".sb-uh").count(), 16);
 await shot(s1, "02-student-locked");
 
@@ -155,14 +155,17 @@ const copyBlocked = await s1.evaluate(() => { const e = new Event("copy", { bubb
 assert.equal(copyBlocked, true, "копирование заблокировано");
 assert.equal(await s1.evaluate(() => getComputedStyle(document.querySelector("#content .ex-i")).userSelect), "none");
 
-step("Ответы хранятся на устройстве и уходят преподавателю только по Done");
+step("Ответы сохраняются в базе автоматически, Done отмечает упражнение как выполненное");
+await s1.locator("#save-state", { hasText: /Saved/ }).waitFor({ timeout: 8000 });
 let dbLocal = await s1.evaluate(() => JSON.parse(localStorage.getItem("mock:db")));
-assert.ok(!Object.keys(dbLocal).some((k) => k.startsWith("submissions/")), "до Done в базу ничего не отправлено");
+let subKey = Object.keys(dbLocal).find((k) => k.startsWith("submissions/"));
+assert.equal(dbLocal[subKey]?.answers?.m1?.["1"], "B", "ответы в базе уже до Done");
 await s1.click('[data-done="m1"]');
-await s1.locator("#save-state", { hasText: /Sent to your teacher/ }).waitFor({ timeout: 5000 });
+await s1.locator("#save-state", { hasText: /Saved/ }).waitFor({ timeout: 5000 });
+await s1.waitForTimeout(400);
 dbLocal = await s1.evaluate(() => JSON.parse(localStorage.getItem("mock:db")));
-const subKey = Object.keys(dbLocal).find((k) => k.startsWith("submissions/"));
-assert.equal(dbLocal[subKey].answers.m1["1"], "B", "после Done ответы в базе");
+subKey = Object.keys(dbLocal).find((k) => k.startsWith("submissions/"));
+assert.equal(dbLocal[subKey].answers._done.m1, "1", "после Done упражнение отмечено");
 
 step("Преподаватель проверяет одно упражнение, студент видит результат сразу");
 await t.click('.sb-uh[data-unit="u1"]').catch(() => {});
@@ -185,7 +188,7 @@ await s1.fill(sel("m3", "8"), "Block him");
 await s1.fill(sel("m4", "1"), "with");
 await s1.fill(sel("m4", "2"), "of");
 await s1.click('[data-done="m3"]'); await s1.click('[data-done="m4"]');
-await s1.locator("#save-state", { hasText: /Sent to your teacher/ }).waitFor({ timeout: 5000 });
+await s1.locator("#save-state", { hasText: /Saved/ }).waitFor({ timeout: 5000 });
 assert.equal(await s1.locator("#ex-m3 .ex-tag").textContent(), "Checked by your teacher");
 await t.click('[data-act="check-ex"][data-ex="m4"]');
 await s1.waitForSelector("#ex-m4 .ex-score", { timeout: 5000 });
@@ -322,6 +325,15 @@ await t.fill('#detail .g-comment[data-ex="w2"]', "Good topic sentence; add one m
 await t.click("#detail [data-act=save-grades] >> nth=0");
 await t.waitForSelector("text=Marks saved");
 await shot(t, "03-teacher-works");
+
+step("Кнопка «Return for revision» видна в таблице; возврат работы студенту");
+await t.waitForSelector("tr:has-text('Boris Petrov') [data-act=return]");
+await t.click("tr:has-text('Boris Petrov') [data-act=return]");
+await s2.waitForSelector(".ub-ret", { timeout: 5000 });
+await s2.waitForSelector("#submit-unit");
+await shot(s2, "19-student-returned");
+await markAllDone(s2); await s2.click("#submit-unit");
+await s2.waitForSelector(".ub-sub");
 
 step("Результаты не видны студенту до включения проверки");
 assert.equal(await s1.locator(".ub-res").count(), 0);

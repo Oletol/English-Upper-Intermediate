@@ -2,7 +2,7 @@
    English Upper-Intermediate — styles (layout of the course workbook, palette of «Чердак»)
    Student edition: Cherdak navy + accent blue.  Teacher edition (body.teacher): Cherdak violet.
    ===================================================================== */
-@import url("fonts.css?v=20261029a");
+@import url("fonts.css?v=20261112u");
 /* Palette and type: «Чердак» (Cherdak). Variable names kept from the template:
    --gold* = Cherdak accent blue, --plum* = Cherdak violet (Teacher's Edition). */
 :root{
@@ -420,7 +420,7 @@ body.teacher .iplay{background:var(--plum)}
 .iplay.missing{background:#e3c2c2}
 .items.quotes .li-t,.items.quotes .m-word{font-family:var(--serif);font-style:italic;font-size:16px}
 
-/* ---------------- Cherdak brand ---------------- */
+/* ---------------- brand row / sign-in ---------------- */
 .brand{display:flex;align-items:center;gap:9px;margin-bottom:12px;color:#fff;text-decoration:none}
 .brand img{width:32px;height:32px;border-radius:8px;flex:none;box-shadow:0 0 0 1px rgba(255,255,255,.14)}
 .brand span{font-weight:700;font-size:16px;letter-spacing:-.005em}
@@ -468,39 +468,32 @@ ol.items select.gap{margin:0 3px}
 .keyhint.model{display:block;margin:6px 0 4px;padding:6px 10px;line-height:1.5;font-weight:400;color:var(--ink2);background:#eff8f2}
 .keyhint.model b{color:var(--ok)}
 
-
-/* ===== Added from the Grammar_1 engine (Oct 2026): Done per exercise, In-Class/HA, live statistics, attendance,
-   speaking timers, Word export, translation guard ===== */
-.gf{border-top:1px dashed #cfe0f0;margin-top:8px;padding-top:8px}
-.gf-h{font-size:10.5px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:var(--navy);margin-bottom:5px}
-.gf-forms{display:flex;flex-wrap:wrap;gap:5px;align-items:center;margin-bottom:6px}
-.gf-chip{background:#fff;border:1px solid var(--line2);border-radius:999px;padding:1px 9px;font-size:12.5px;color:var(--mut)}
-.gf-chip .gf-w{font-family:var(--serif);font-size:14px;color:var(--ink,#1d2433);font-weight:600}
-.gf-issues{margin:0 0 6px;padding-left:20px;color:#8a3b12}
-.gf-issues li{margin-bottom:3px}
-.gf-note{font-size:11.5px;color:var(--mut);margin:4px 0 0}
+/* video (Rutube embed) */
 .video{border:1px solid var(--line);border-radius:var(--r);background:var(--paper);box-shadow:var(--sh2);padding:14px 16px;margin:18px 0}
 .video .vid-t{font-family:var(--serif);font-weight:700;font-size:17px;color:var(--navy);margin:0 0 10px}
 .video .vid-box{position:relative;aspect-ratio:16/9;border-radius:var(--r2);overflow:hidden;background:#000}
 .video .vid-box iframe{position:absolute;inset:0;width:100%;height:100%;border:0}
 .video .vid-n{font-size:13.5px;color:var(--mut);margin-top:8px}
+/* sentences with several gaps written as an inline list */
 .inline-text ol.items{padding-left:22px}
 .inline-text ol.items li{margin-bottom:9px}
+
+/* Word export bar (Teacher's Edition) */
 .dl-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 18px;padding:8px 14px;border:1px solid var(--line);border-radius:var(--r2);background:var(--paper);font-size:13.5px;color:var(--mut)}
+/* page translation is switched off for students */
 .no-translate{position:fixed;inset:0;z-index:9999;background:rgba(22,35,63,.94);color:#fff;display:flex;align-items:center;justify-content:center;padding:24px;text-align:center}
 .no-translate .nt-card{max-width:460px;background:var(--navy2);border-radius:16px;padding:26px 28px;box-shadow:0 20px 50px rgba(0,0,0,.35)}
 .no-translate h3{color:#fff;font-size:21px;margin:0 0 10px}
 .no-translate p{color:rgba(255,255,255,.85);font-size:15px;margin:0}
+/* spidergram (Speaking, collaborative task) */
 .spider{display:grid;grid-template-columns:1fr 1.2fr 1fr;grid-template-rows:auto auto auto;gap:14px 18px;align-items:center;margin:16px 0 22px;padding:18px;
  border:1px solid var(--line);border-radius:var(--r);background:var(--paper);box-shadow:var(--sh2);position:relative}
 .spider .sp-c{grid-area:2/2;background:var(--navy);color:#fff;border-radius:14px;padding:16px 18px;text-align:center;font-family:var(--serif);font-size:16.5px;line-height:1.4}
 .spider .sp-i{background:var(--gold3);border:1px solid var(--gold2);border-radius:999px;padding:10px 14px;text-align:center;font-size:15px;font-weight:600;color:var(--navy)}
-.spider .sp-tl{grid-area:1/1}
-.spider .sp-tr{grid-area:1/3}
-.spider .sp-ml{grid-area:2/1}
-.spider .sp-mr{grid-area:2/3}
-.spider .sp-b{grid-area:3/2}
+.spider .sp-tl{grid-area:1/1}.spider .sp-tr{grid-area:1/3}.spider .sp-ml{grid-area:2/1}.spider .sp-mr{grid-area:2/3}.spider .sp-b{grid-area:3/2}
 @media (max-width:700px){.spider{grid-template-columns:1fr}.spider>*{grid-area:auto!important}.spider .sp-c{order:-1}}
+
+/* ---------------- speaking: timer and voice recorder ---------------- */
 .spk{display:flex;flex-wrap:wrap;gap:10px 14px;align-items:center;margin:14px 18px 16px;padding:12px 14px;
  border:1px solid var(--gold2);background:var(--gold3);border-radius:var(--r2)}
 .block-spk .spk{margin:18px 0}
@@ -531,8 +524,13 @@ ol.items select.gap{margin:0 3px}
 .spk-meter{flex:0 1 220px;height:8px;border-radius:5px;background:var(--line);overflow:hidden}
 .spk-meter i{display:block;height:100%;width:0;background:var(--teal);transition:width .1s linear}
 .spk-quiet{font-weight:600;color:var(--warn)}
+
+/* ---------------- weekly course: sidebar groups, week labels ---------------- */
 .sb-label.sb-series{margin-top:14px}
 .sb-uh .u-l{display:block;font-family:var(--sans);font-size:10.5px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:var(--sb-accent);margin-bottom:1px}
+.sb-uh .u-n{width:auto;min-width:30px;padding:2px 5px}
+
+/* ---------------- Russian / Chinese switch for translation sentences ---------------- */
 .lang-sw{display:inline-flex;border:1px solid var(--line);border-radius:16px;overflow:hidden;flex:none;background:#fff}
 .lang-sw button{font:inherit;font-size:12.5px;font-weight:700;border:none;background:transparent;color:var(--navy);padding:4px 11px;cursor:pointer}
 body:not(.lang-zh) .lang-sw button[data-lang="ru"],body.lang-zh .lang-sw button[data-lang="zh"]{background:var(--navy);color:#fff}
@@ -540,6 +538,8 @@ body.teacher:not(.lang-zh) .lang-sw button[data-lang="ru"],body.teacher.lang-zh 
 .src-zh{display:none;font-size:16.5px;line-height:1.7}
 body.lang-zh .src-zh{display:inline}
 body.lang-zh .src-ru{display:none}
+
+/* ---------------- explanations in Chinese (opened on demand) ---------------- */
 details.zh-note{margin:-12px 0 22px;border:1px dashed #c9d6e6;border-radius:0 0 var(--r2) var(--r2);background:#fbfcfe;padding:0 16px}
 details.zh-note summary{cursor:pointer;font-size:13px;font-weight:700;color:var(--navy3);padding:9px 0;list-style:none}
 details.zh-note summary::-webkit-details-marker{display:none}
@@ -549,6 +549,8 @@ details.zh-note .zh-b{font-size:15.5px;line-height:1.85;color:var(--ink2);paddin
 details.zh-note .zh-b p{margin:0 0 8px}
 details.zh-note .zh-b ul{margin:0 0 8px;padding-left:20px}
 details.zh-note .zh-b i{font-style:italic;color:var(--navy)}
+
+/* ---------------- grammar analysis: sentence + answer template ---------------- */
 .inline-text ol.an-list{padding-left:26px;margin:0}
 .an-list>li{margin:0 0 20px}
 .an-list .src{font-family:var(--serif);font-size:16.5px;line-height:1.6;margin:0 0 7px;color:#242c3c}
@@ -568,6 +570,157 @@ details.zh-note .zh-b i{font-style:italic;color:var(--navy)}
 .an-list .src .use select.gap,.an-list .tpl .use+select.gap{font-size:13px}
 .an-list .src .use select.gap{border-color:#c9d6e6;background:var(--gold3);max-width:11em}
 .art-text select.gap{min-width:3.6em}
+
+/* Teacher's Edition: dropdowns open for viewing the choices, the key preselected */
+select.gap.key-sel{border-color:var(--ok);background:var(--ok2);color:var(--ok);cursor:pointer}
+
+/* ---------------- Done button, In-Class / HA, live statistics, attendance ---------------- */
+.ex-foot{display:flex;align-items:center;justify-content:flex-end;gap:12px;padding:10px 18px;border-top:1px solid var(--line2);background:#fbfcfe;font-size:13.5px}
+.ex-foot.done{background:var(--ok2)}
+.ex-foot .ok-mark{color:var(--ok);font-weight:800;margin-right:auto}
+.ex.is-done{border-color:#b9dcc7}
+.ex.flash{box-shadow:0 0 0 3px var(--gold2);transition:box-shadow .3s}
+.ex-plan{font-size:10.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;border-radius:14px;padding:3px 9px;flex:none;border:1px solid}
+.ex-plan.class{background:var(--teal2);color:var(--teal);border-color:#b7dcd7}
+.ex-plan.home{background:var(--gold3);color:var(--gold);border-color:#c9d6e6}
+.ex-score.low{background:var(--gold3);color:var(--gold);cursor:help}
+.ub-done{font-size:13.5px;color:var(--ink2);margin-left:auto}
+.ub-left{flex-basis:100%;font-size:13.5px;color:var(--ink2);line-height:1.9}
+.ub-left a{display:inline-block;font-family:var(--mono);font-size:12.5px;font-weight:700;margin:0 2px;padding:0 6px;border:1px solid var(--line);border-radius:5px;background:var(--bg);text-decoration:none;line-height:1.6}
+.ub-left a:hover{border-color:var(--gold);background:var(--gold3)}
+.tip{font-size:13.5px}
+.ex-bar.tbar{flex-direction:column;align-items:stretch;gap:7px}
+.tb-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.seg{display:inline-flex;border:1px solid #d9cdee;border-radius:8px;overflow:hidden;background:#fff;flex:none}
+.seg button{font:inherit;font-size:12px;font-weight:800;letter-spacing:.04em;border:none;background:none;padding:4px 11px;cursor:pointer;color:var(--ink2)}
+.seg button + button{border-left:1px solid #d9cdee}
+.seg button:hover{background:var(--bg)}
+.seg button.on[data-as=class]{background:var(--teal);color:#fff}
+.seg button.on[data-as=home]{background:var(--gold);color:#fff}
+.tb-done{display:inline-flex;align-items:center;gap:5px;font-weight:700;color:var(--ink2);cursor:pointer}
+.tb-done.on{color:var(--ok)}
+.tb-date{font:inherit;font-size:13px;padding:2px 6px;border:1px solid var(--line);border-radius:6px;background:#fff}
+.tstat{font-size:12.5px;color:var(--ink2)}
+.bad-n{color:var(--bad);font-weight:700}
+.ib{display:inline-flex;gap:4px;margin-left:8px;font-family:var(--mono);font-size:11.5px;font-weight:700;vertical-align:middle;line-height:1.55;cursor:help}
+.ib-ok{color:var(--ok);background:var(--ok2);border-radius:4px;padding:0 5px}
+.ib-bad{color:var(--bad);background:var(--bad2);border-radius:4px;padding:0 5px}
+.mist{margin:0 18px 16px;padding:10px 14px;border:1px dashed #e3b9b0;border-radius:var(--r2);background:#fffafa;font-size:14px}
+.mist-h{font-size:10.5px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--bad);margin-bottom:6px}
+.mist table.t{margin:0;box-shadow:none}
+.mist table.t td{vertical-align:top;padding:6px 10px}
+.mw{color:var(--bad);font-weight:600}
+.jt th.jc,.jt td.jc{text-align:center;padding-left:4px;padding-right:4px;min-width:56px}
+.att{font:inherit;font-weight:800;width:34px;height:28px;border-radius:7px;border:1px solid;cursor:pointer}
+.att.pres{background:var(--ok2);border-color:#b9dcc7;color:var(--ok)}
+.att.abs{background:var(--bad2);border-color:#e3b9b0;color:var(--bad)}
+.jdel{font:inherit;font-size:10.5px;font-weight:600;letter-spacing:0;text-transform:none;border:none;background:none;color:#cdb8f5;cursor:pointer;text-decoration:underline;padding:0}
+.jfoot td{font-weight:700;background:var(--bg)}
+.jx{display:inline-block;font-family:var(--mono);font-size:12px;font-weight:700;padding:0 6px;border-radius:5px;margin:1px 2px}
+.jx.class{background:var(--teal2);color:var(--teal)}
+.jx.home{background:var(--gold3);color:var(--gold)}
+@media print{.ex-foot,.ex-bar{display:none!important}}
+.jt td.jc.num{text-align:center}
+
+/* speaking: recording turned into text (blocks with "transcribe") */
+.spk-tr{flex:1 1 100%;font-size:13.5px;line-height:1.5;color:var(--ink2);background:#eef6f5;border:1px solid #cfe5e2;border-radius:8px;padding:8px 12px}
+.spk-tr.bad{color:var(--bad);background:#fbf0ef;border-color:#efd3d0}
+textarea.open-answer.transcript{background:#fbfaf6;cursor:default}
+.sp-line{font-size:12.5px;color:var(--mut);margin:2px 0 6px}
+.sp-line:empty{display:none}
+
+/* ---------------- Speaking / Writing progress (teacher) ---------------- */
+.prog-ctl{display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px;margin:6px 0 16px}
+.prog-ctl label{font-size:13px;font-weight:650;color:var(--ink2)}
+.prog-ctl select,.viewas-bar select{font:inherit;font-size:14px;font-weight:500;padding:4px 6px;border:1px solid var(--line);border-radius:7px;background:#fff;margin-left:6px;max-width:330px}
+.prog-h{margin:22px 0 8px}
+.t.prog th .s{display:block;font-weight:500;font-size:11px;color:#ddd0f3;letter-spacing:0;text-transform:none}
+.t.prog td{padding:7px 9px}
+.t.prog td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.t.prog td.nm{white-space:nowrap}
+.t.prog td.up{color:var(--ok);font-weight:700}
+.t.prog td.down{color:var(--bad);font-weight:700}
+.t.prog tfoot td{border-top:2px solid var(--line)}
+.t.prog a{color:inherit;text-decoration:underline dotted;text-underline-offset:3px}
+.t.prog th .all-link{color:#cdb8f5;font-size:10px;margin-left:6px}
+.spark{display:block}
+.prog-chart{margin:4px 0 18px;padding:12px 14px 6px;background:#fff;border:1px solid var(--line);border-radius:var(--r2);max-width:760px}
+.prog-chart svg{width:100%;height:auto;display:block}
+.prog-chart .ax{font-size:11px;fill:var(--mut)}
+.prog-chart .grid{stroke:var(--line2);stroke-width:1}
+.prog-chart polyline.st{fill:none;stroke:#c4cad6;stroke-width:1.4}
+.prog-chart polyline.st:hover{stroke:var(--gold);stroke-width:2.4}
+.prog-chart polyline.st.one{stroke:var(--teal);stroke-width:2.6}
+.prog-chart circle.one{fill:var(--teal)}
+.prog-chart polyline.mn{fill:none;stroke:var(--plum);stroke-width:3}
+.prog-chart circle.mn{fill:var(--plum)}
+.prog-chart figcaption{font-size:12px;color:var(--mut);margin-top:4px}
+.prog-chart .lg{display:inline-block;width:18px;height:0;border-top:3px solid var(--plum);vertical-align:middle;margin-right:4px}
+.prog-chart .lg.st{border-top:2px solid #c4cad6}
+.prog-chart .lg.st.one{border-top:3px solid var(--teal)}
+.prog-tasks{font-size:13px;margin:14px 0;padding-left:20px;color:var(--ink2)}
+.prog-tasks li{margin:3px 0}
+.prog-detail .prog-text{white-space:pre-wrap;font-family:var(--serif);font-size:15px;line-height:1.6;background:var(--bg);border-radius:8px;padding:10px 12px;margin:8px 0}
+.prog-facts{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;font-size:13.5px;margin:10px 0 0}
+.prog-facts dt{color:var(--mut)}
+.prog-facts dd{margin:0}
+.spk-card{margin:14px 0;padding:14px 18px}
+.spk-card b{display:inline;font-family:inherit;font-size:inherit;color:inherit;line-height:inherit}
+.spk-card h3{margin:0 0 6px}
+.spk-t td{vertical-align:top}
+.spk-text td{border-top:0;padding-top:0}
+.spk-text p{white-space:pre-wrap;margin:6px 0 10px;color:var(--ink)}
+.tscroll{overflow-x:auto}
+.stats-t td,.stats-t th{padding:7px 8px}
+
+/* ---------------- whose answers are shown on a unit page (teacher) ---------------- */
+.viewas-bar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:0 0 14px;padding:8px 12px;border:1px solid var(--line);border-radius:var(--r2);background:#fff}
+.viewas-bar label{font-size:13px;font-weight:700;color:var(--ink2)}
+.viewas-bar select{margin-left:0}
+.viewas-bar.on{border-color:var(--teal);background:#eef6f5}
+.prog-set button.on{background:var(--plum);color:#fff}
+.set-tag{display:inline-block;font-size:10px;font-weight:800;letter-spacing:.05em;padding:1px 6px;border-radius:5px;vertical-align:1px;color:#fff;background:var(--mut)}
+.set-tag.class{background:var(--teal)}
+.set-tag.home{background:var(--gold)}
+.spk-card .set-tag,.prog-tasks .set-tag{color:#fff;font-size:10px}
+
+/* a pair discussion recorded by the partner: the copy of the text and the feedback */
+.pair-fb{margin:10px 18px 14px;padding:10px 14px;border:1px dashed var(--teal);border-radius:var(--r2);background:#f4faf9}
+.pair-fb .pair-note{margin:0 0 6px;font-size:13.5px;color:var(--ink2)}
+.pair-sel{font:inherit;font-size:13.5px;padding:3px 6px;border:1px solid var(--line);border-radius:7px;background:#fff;max-width:260px}
+
+/* My results (student) */
+.res-week{margin:18px 0;padding:16px 18px}
+.res-week h3{margin:0 0 8px}
+.res-week h3 a{color:inherit;text-decoration:none}
+.res-t td.num a{font-family:var(--mono);font-weight:600}
+/* the page is out of date: offer to reload */
+.upd-bar{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:60;display:flex;gap:12px;align-items:center;
+  background:var(--navy);color:#fff;padding:10px 14px;border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,.25);font-size:14px}
+.seg button.on[data-act=stats-mode]{background:var(--navy);color:#fff}
+/* grammar of the module in the feedback */
+.wfb-comment{margin:8px 0;padding:8px 12px;border-left:3px solid var(--plum);background:#f6f2fc;font-style:italic}
+.wfb-g{margin:10px 0 6px;padding:8px 12px;border:1px dashed var(--line);border-radius:8px}
+.wfb-gh{font-weight:700;font-size:14px;margin-bottom:4px}
+.wfb-gl{margin:4px 0 4px 18px;padding:0;font-size:14px}
+.wfb-gl li{margin:2px 0}
+.tg-ok{color:var(--ok)}
+.tg-bad{color:var(--bad)}
+.ai-box textarea{width:100%;min-height:120px;font:inherit}
+.ai-box .row label{display:flex;flex-direction:column;gap:3px;font-size:13px}
+.ai-box input,.ai-box select{font:inherit;padding:5px 8px;border:1px solid var(--line);border-radius:6px}
+
+/* ===== English Upper-Intermediate: rules kept from its earlier engine ===== */
+/* ===== Added from the Grammar_1 engine (Oct 2026): Done per exercise, In-Class/HA, live statistics, attendance,
+   speaking timers, Word export, translation guard ===== */
+.gf{border-top:1px dashed #cfe0f0;margin-top:8px;padding-top:8px}
+.gf-h{font-size:10.5px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:var(--navy);margin-bottom:5px}
+.gf-forms{display:flex;flex-wrap:wrap;gap:5px;align-items:center;margin-bottom:6px}
+.gf-chip{background:#fff;border:1px solid var(--line2);border-radius:999px;padding:1px 9px;font-size:12.5px;color:var(--mut)}
+.gf-chip .gf-w{font-family:var(--serif);font-size:14px;color:var(--ink,#1d2433);font-weight:600}
+.gf-issues{margin:0 0 6px;padding-left:20px;color:#8a3b12}
+.gf-issues li{margin-bottom:3px}
+.gf-note{font-size:11.5px;color:var(--mut);margin:4px 0 0}
 .sb-sgroup{font-size:10px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:var(--sb-accent);opacity:.8;margin:10px 0 3px 11px}
 .sb-sgroup:first-child{margin-top:4px}
 .pick{display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px;margin:6px 0 4px}
@@ -620,52 +773,6 @@ details.rule[open] .rule-toggle::after{content:"Hide the rule"}
 details.rule>summary.rule-h:hover .rule-toggle{background:#eef4fb}
 @media print{details.rule .rule-toggle{display:none}}
 i.vb{font-family:var(--sans);font-size:.88em;color:var(--plum);white-space:nowrap}
-.ex-foot{display:flex;align-items:center;justify-content:flex-end;gap:12px;padding:10px 18px;border-top:1px solid var(--line2);background:#fbfcfe;font-size:13.5px}
-.ex-foot.done{background:var(--ok2)}
-.ex-foot .ok-mark{color:var(--ok);font-weight:800;margin-right:auto}
-.ex.is-done{border-color:#b9dcc7}
-.ex.flash{box-shadow:0 0 0 3px var(--gold2);transition:box-shadow .3s}
-.ex-plan{font-size:10.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;border-radius:14px;padding:3px 9px;flex:none;border:1px solid}
-.ex-plan.class{background:var(--teal2);color:var(--teal);border-color:#b7dcd7}
-.ex-plan.home{background:var(--gold3);color:var(--gold);border-color:#c9d6e6}
-.ex-score.low{background:var(--gold3);color:var(--gold);cursor:help}
-.ub-done{font-size:13.5px;color:var(--ink2);margin-left:auto}
-.ub-left{flex-basis:100%;font-size:13.5px;color:var(--ink2);line-height:1.9}
-.ub-left a{display:inline-block;font-family:var(--mono);font-size:12.5px;font-weight:700;margin:0 2px;padding:0 6px;border:1px solid var(--line);border-radius:5px;background:var(--bg);text-decoration:none;line-height:1.6}
-.ub-left a:hover{border-color:var(--gold);background:var(--gold3)}
-.tip{font-size:13.5px}
-.ex-bar.tbar{flex-direction:column;align-items:stretch;gap:7px}
-.tb-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-.seg{display:inline-flex;border:1px solid #d9cdee;border-radius:8px;overflow:hidden;background:#fff;flex:none}
-.seg button{font:inherit;font-size:12px;font-weight:800;letter-spacing:.04em;border:none;background:none;padding:4px 11px;cursor:pointer;color:var(--ink2)}
-.seg button + button{border-left:1px solid #d9cdee}
-.seg button:hover{background:var(--bg)}
-.seg button.on[data-as=class]{background:var(--teal);color:#fff}
-.seg button.on[data-as=home]{background:var(--gold);color:#fff}
-.tb-done{display:inline-flex;align-items:center;gap:5px;font-weight:700;color:var(--ink2);cursor:pointer}
-.tb-done.on{color:var(--ok)}
-.tb-date{font:inherit;font-size:13px;padding:2px 6px;border:1px solid var(--line);border-radius:6px;background:#fff}
-.tstat{font-size:12.5px;color:var(--ink2)}
-.bad-n{color:var(--bad);font-weight:700}
-.ib{display:inline-flex;gap:4px;margin-left:8px;font-family:var(--mono);font-size:11.5px;font-weight:700;vertical-align:middle;line-height:1.55;cursor:help}
-.ib-ok{color:var(--ok);background:var(--ok2);border-radius:4px;padding:0 5px}
-.ib-bad{color:var(--bad);background:var(--bad2);border-radius:4px;padding:0 5px}
-.mist{margin:0 18px 16px;padding:10px 14px;border:1px dashed #e3b9b0;border-radius:var(--r2);background:#fffafa;font-size:14px}
-.mist-h{font-size:10.5px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--bad);margin-bottom:6px}
-.mist table.t{margin:0;box-shadow:none}
-.mist table.t td{vertical-align:top;padding:6px 10px}
-.mw{color:var(--bad);font-weight:600}
-.jt th.jc,.jt td.jc{text-align:center;padding-left:4px;padding-right:4px;min-width:56px}
-.att{font:inherit;font-weight:800;width:34px;height:28px;border-radius:7px;border:1px solid;cursor:pointer}
-.att.pres{background:var(--ok2);border-color:#b9dcc7;color:var(--ok)}
-.att.abs{background:var(--bad2);border-color:#e3b9b0;color:var(--bad)}
-.jdel{font:inherit;font-size:10.5px;font-weight:600;letter-spacing:0;text-transform:none;border:none;background:none;color:#cdb8f5;cursor:pointer;text-decoration:underline;padding:0}
-.jfoot td{font-weight:700;background:var(--bg)}
-.jx{display:inline-block;font-family:var(--mono);font-size:12px;font-weight:700;padding:0 6px;border-radius:5px;margin:1px 2px}
-.jx.class{background:var(--teal2);color:var(--teal)}
-.jx.home{background:var(--gold3);color:var(--gold)}
-@media print{.ex-foot,.ex-bar{display:none!important}}
-.jt td.jc.num{text-align:center}
 .tnote details.kx{margin:4px 0 0}
 .tnote details.kx>summary{cursor:pointer;list-style:none;font-weight:700;color:var(--plum);font-size:14px}
 .tnote details.kx>summary::-webkit-details-marker{display:none}

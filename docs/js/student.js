@@ -4,22 +4,23 @@ import {
   auth, db, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword,
   sendPasswordResetEmail, signOut, doc, getDoc, setDoc, updateDoc, onSnapshot, collection, query, orderBy,
   serverTimestamp,
-} from "./fb.js?v=20261029a";
-import { COURSE_TITLE } from "./firebase-config.js?v=20261029a";
+} from "./fb.js?v=20261112u";
+import { COURSE_TITLE } from "./firebase-config.js?v=20261112u";
 import {
-  esc, renderBlocks, readInput, fmtTime, friendlyError, authFormHTML, wireAuthForm, subId, exercisesOf, isAuto,
-  isTeacherChecked, hasPick, wireFlashcards, countWords, unitNo, unitLabel, wireLang,
-  DONE, doneMap, exerciseNumbers, planTag, gradeExercise,
-} from "./common.js?v=20261029a";
-import "./speaking.js?v=20261029a";
-import { initShell, renderUnitNav, wireUnitNav } from "./shell.js?v=20261029a";
-import { feedbackHTML } from "./writing.js?v=20261029a";
+  esc, renderBlocks, readInput, fmtTime, friendlyError, authFormHTML, wireAuthForm, subId, exercisesOf, isAuto, isPractice,
+  isTeacherChecked, wireFlashcards, countWords, DONE, doneMap, exerciseNumbers, planTag, unitNo, unitLabel, wireLang, gradeExercise,
+  isManual, itemMax, studentItems, r2,
+} from "./common.js?v=20261112u";
+import { initShell, renderUnitNav, wireUnitNav } from "./shell.js?v=20261112u";
+import { feedbackHTML, pairFeedbackHTML } from "./writing.js?v=20261112u";
+import "./speaking.js?v=20261112u";
 
 const $ = (s) => document.querySelector(s);
 const S = {
   user: null, profile: null, group: null, units: [],
   content: {},   // unitId -> content | null (нет доступа)
   sub: {},       // unitId -> {answers, status, updatedAt, dirty}
+  server: {},    // unitId -> answers as the database has them (needed for exercises the teacher has checked)
   result: {},    // unitId -> result | null
   exr: {},       // unitId -> results of exercises the teacher has checked one by one
   exrVer: 0,
@@ -28,8 +29,10 @@ const S = {
   unsub: [], unitUnsub: {}, resultUnsub: {},
   registering: false,
 };
-const SAVE_DELAY = 1000;
-const LOCAL_NOTE = "Saved on this device. Click Done to send the exercise to your teacher.";
+// Answers are saved automatically (on this device at once, in the database a moment later), so nothing is lost
+// when the teacher checks an exercise. "Done" tells the teacher that the student has finished the exercise.
+const LOCAL_NOTE = "Saving…";
+const SAVE_DELAY = 2500;
 let saveTimer = null;
 
 document.title = COURSE_TITLE;
@@ -67,7 +70,11 @@ wireAuthForm($("#auth-screen"), {
     }
   },
 });
-$("#logout").addEventListener("click", async () => { await flushSave(); signOut(auth); });
+$("#logout").addEventListener("click", async () => {
+  // give the last answers a moment to reach the database before signing out
+  await Promise.race([flushSave(true), new Promise((r) => setTimeout(r, 2000))]).catch(() => {});
+  signOut(auth);
+});
 
 onAuthStateChanged(auth, (user) => {
   stopAll();
@@ -105,7 +112,7 @@ function stopAll() {
   Object.values(S.resultUnsub).forEach((u) => u()); S.resultUnsub = {};
   Object.values(S.attUnsub).forEach((u) => u()); S.attUnsub = {};
   Object.values(S.tresUnsub).forEach((u) => u()); S.tresUnsub = {};
-  Object.assign(S, { profile: null, group: null, units: [], content: {}, sub: {}, result: {}, exr: {}, att: {}, tcontent: {}, tres: {}, tdraft: {} });
+  Object.assign(S, { profile: null, group: null, units: [], content: {}, sub: {}, server: {}, result: {}, exr: {}, att: {}, tcontent: {}, tres: {}, tdraft: {} });
 }
 
 let groupUnsub = null;
@@ -113,6 +120,7 @@ function subscribeGroup(gid) {
   groupUnsub?.();
   groupUnsub = onSnapshot(doc(db, "groups", gid), (snap) => {
     S.group = snap.exists() ? snap.data() : { openUnits: [], releasedUnits: [] };
+    Object.keys(S.sub).forEach(lockChecked);
     $("#me-group").textContent = "Group: " + (S.group.name || gid);
     syncUnitSubscriptions();
     renderNav(); renderMain();
@@ -126,8 +134,8 @@ const isReleased = (id) => !!S.group?.releasedUnits?.includes(id);
 // Реакция в реальном времени на открытие/закрытие юнита и включение проверки
 function syncUnitSubscriptions() {
   for (const key of Object.keys(S.unitUnsub)) {
-    const id = key.replace(/^(sub|exr):/, "");
-    if (!isOpen(id)) { S.unitUnsub[key](); delete S.unitUnsub[key]; delete S.content[id]; delete S.sub[id]; delete S.exr[id]; }
+    const id = key.replace(/^(c|sub|exr):/, "");
+    if (!isOpen(id)) { S.unitUnsub[key](); delete S.unitUnsub[key]; delete S.content[id]; delete S.sub[id]; delete S.server[id]; delete S.exr[id]; }
   }
   for (const id of Object.keys(S.resultUnsub)) {
     if (!isReleased(id)) { S.resultUnsub[id](); delete S.resultUnsub[id]; delete S.result[id]; }
@@ -136,41 +144,74 @@ function syncUnitSubscriptions() {
     if (S.resultUnsub[id] || !S.sub[id]) continue;
     S.resultUnsub[id] = onSnapshot(doc(db, "results", subId(id, S.user.uid)),
       (snap) => { S.result[id] = snap.exists() ? snap.data() : null; renderMain(); },
-      () => { S.result[id] = null; renderMain(); });
+      (e) => {
+        // a listener that fails is closed by Firestore: try again a little later instead of showing nothing for ever
+        console.warn("results", id, e?.code || e);
+        S.resultUnsub[id]?.(); delete S.resultUnsub[id];
+        if (S.result[id] === undefined) S.result[id] = null;
+        renderMain();
+        setTimeout(() => { if (S.user && isReleased(id)) syncUnitSubscriptions(); }, RETRY_MS);
+      });
   }
 }
 
+const RETRY_MS = 15000;
+// one real-time listener of the unit; when it fails (e.g. the connection or the rights changed for a moment),
+// it is opened again after a pause, so that results and feedback do not stay hidden until the page is reloaded
+function listen(unitId, key, ref, onData, onFail, opts = {}) {
+  if (S.unitUnsub[key]) return;
+  S.unitUnsub[key] = onSnapshot(ref, opts, onData, (e) => {
+    console.warn(key, e?.code || e);
+    S.unitUnsub[key]?.(); delete S.unitUnsub[key];
+    onFail?.(e);
+    renderMain();
+    setTimeout(() => { if (S.user && isOpen(unitId)) ensureUnit(unitId); }, RETRY_MS);
+  });
+}
+
 function ensureUnit(unitId) {
-  if (S.unitUnsub[unitId]) return;
-  S.unitUnsub[unitId] = onSnapshot(doc(db, "unitContent", unitId),
+  listen(unitId, "c:" + unitId, doc(db, "unitContent", unitId),
     (snap) => { S.content[unitId] = snap.exists() ? snap.data() : null; renderMain(); },
-    () => { S.content[unitId] = null; renderMain(); });
+    () => { if (S.content[unitId] === undefined) S.content[unitId] = null; });
   // results of exercises that the teacher checks one by one
-  S.unitUnsub["exr:" + unitId] = onSnapshot(doc(db, "exerciseResults", subId(unitId, S.user.uid)),
+  listen(unitId, "exr:" + unitId, doc(db, "exerciseResults", subId(unitId, S.user.uid)),
     (snap) => { S.exr[unitId] = snap.exists() ? snap.data() : null; S.exrVer++; renderMain(); },
-    () => { S.exr[unitId] = null; });
+    () => { if (S.exr[unitId] === undefined) S.exr[unitId] = null; });
   // Своя работа — тоже в реальном времени (преподаватель может «вернуть на доработку»)
   const key = "sub:" + unitId;
-  S.unitUnsub[key] = onSnapshot(doc(db, "submissions", subId(unitId, S.user.uid)), (snap) => {
+  listen(unitId, key, doc(db, "submissions", subId(unitId, S.user.uid)), (snap) => {
     const server = snap.exists() ? snap.data() : { answers: {}, status: "none" };
     const cur = S.sub[unitId];
     if (!cur) {
-      S.sub[unitId] = { ...server, dirty: false };
-      // локальная копия новее серверной? (например, вкладку закрыли до отправки)
-      const local = readLocal(unitId);
-      const serverMs = server.updatedAt?.toMillis?.() || 0;
-      if (local && local.ts > serverMs && server.status !== "submitted" && !isReleased(unitId)) {
-        S.sub[unitId].answers = local.answers;
-        S.sub[unitId].dirty = true;
-      }
+      S.sub[unitId] = { ...server, answers: structuredClone(server.answers || {}), dirty: false, confirmed: false };
+      S.server[unitId] = server.answers || {};
     } else if (!snap.metadata.hasPendingWrites) {
       // обновляем статус; ответы — только если у нас нет несохранённых правок
       Object.assign(cur, { status: server.status, submittedAt: server.submittedAt, updatedAt: server.updatedAt || cur.updatedAt, returnNote: server.returnNote, returnedAt: server.returnedAt });
-      if (!cur.dirty) cur.answers = server.answers || {};
+      S.server[unitId] = server.answers || {};
+      if (!cur.dirty) cur.answers = structuredClone(server.answers || {});
     }
+    // The first answer that comes from the server itself (not from the copy kept in the browser):
+    // only now can we tell whether this device has newer answers than the database.
+    const sub = S.sub[unitId];
+    if (!sub.confirmed && !snap.metadata.fromCache) {
+      sub.confirmed = true;
+      const local = readLocal(unitId);
+      const serverMs = server.updatedAt?.toMillis?.() || 0;
+      if (local && local.ts > serverMs && server.status !== "submitted" && !isReleased(unitId)
+          && JSON.stringify(local.answers) !== JSON.stringify(server.answers || {})) {
+        sub.answers = local.answers;
+        sub.dirty = true;
+        scheduleSave(unitId);     // answers typed earlier on this device (e.g. before Done was clicked) now reach the teacher
+      }
+    }
+    lockChecked(unitId);
     syncUnitSubscriptions();
     renderNav(); renderMain();
-  }, () => { S.sub[unitId] ??= { answers: {}, status: "none", dirty: false }; renderMain(); });
+  }, () => { S.sub[unitId] ??= { answers: {}, status: "none", dirty: false, confirmed: false }; },
+  // includeMetadataChanges: we must hear when the copy in the browser has been confirmed by the server,
+  // even if the data are the same (only then are the answers saved to the database)
+  { includeMetadataChanges: true });
 }
 
 // ------------------------------------------------------------------ routing
@@ -178,9 +219,9 @@ function route() {
   const [unit, section] = location.hash.replace(/^#/, "").split("/");
   return { unit: unit || null, section: section || null };
 }
-window.addEventListener("hashchange", async () => {
+window.addEventListener("hashchange", () => {
   const keep = pendingScroll;
-  await flushSave(); renderNav(); renderMain();
+  flushSave(); renderNav(); renderMain();
   if (!keep) window.scrollTo(0, 0);
 });
 
@@ -196,6 +237,7 @@ function renderNav() {
     return `<a class="sb-item ${r.unit === "test" && r.section === key ? "on" : ""}" href="#test/${esc(key)}">
       <span class="ic">⏱</span><span class="t">${esc(t.title)}<span class="s">${esc(note)}</span></span></a>`;
   }).join("");
+  $("#my-nav").innerHTML = `<a class="sb-item ${r.unit === "results" ? "on" : ""}" href="#results"><span class="ic">📊</span><span class="t">My results<span class="s">Marks and feedback</span></span></a>`;
   renderUnitNav($("#unit-nav"), {
     units: S.units,
     route: route(),
@@ -219,6 +261,7 @@ function renderMain() {
   if (!S.user || !S.group) return;
   const r = route();
   if (r.unit === "test") { renderTest(r.section); return; }
+  if (r.unit === "results") { renderResults(); return; }
   const unit = S.units.find((u) => u.id === r.unit);
   const content = $("#content");
   content.dataset.test = "";
@@ -229,8 +272,9 @@ function renderMain() {
     $("#unit-bar").innerHTML = "";
     content.dataset.view = "";
     content.innerHTML = `<header class="page-h"><div class="pe">Welcome</div><h2>Hello${S.profile ? ", " + esc(S.profile.name) : ""}!</h2>
-      <p class="pl">${open.length ? "Choose a week to start working." : "No units are open yet. They will appear here automatically as soon as your teacher opens them."}</p></header>
+      <p class="pl">${open.length ? "Choose a unit to start working." : "No units are open yet. They will appear here automatically as soon as your teacher opens them."}</p></header>
       ${visibleTests().filter(([, t]) => t.open).map(([key, t]) => `<div class="ub ub-res"><span><b>Test: ${esc(t.title)}</b> · ${t.minutes} minutes</span><a class="btn primary" href="#test/${esc(key)}">Go to the test</a></div>`).join("")}
+      ${open.length ? `<p><a class="btn" href="#results">My results</a> <span class="muted">· your marks, checked exercises and feedback in every unit</span></p>` : ""}
       ${open.length ? `<div class="cards">${open.map((u) => `<a class="pg" href="#${esc(u.id)}"><span class="d">${esc(uLabel(u))}</span><span class="t">${esc(u.title)}</span></a>`).join("")}</div>` : ""}`;
     return;
   }
@@ -260,7 +304,8 @@ function renderMain() {
   const relEx = S.group.releasedEx?.[unit.id] || [];
   const done = doneMap(sub.answers);
   const plan = S.group.plan?.[unit.id] || {};
-  const viewKey = `${unit.id}/${sec.id}/${readOnly}/${!!res}/${relEx.join(",")}/${(S.group.feedbackEx?.[unit.id] || []).join(",")}/${S.exrVer}/${JSON.stringify(done)}/${JSON.stringify(plan)}`;
+  const held = readHeld(unit.id);
+  const viewKey = `${unit.id}/${sec.id}/${readOnly}/${!!res}/${relEx.join(",")}/${(S.group.feedbackEx?.[unit.id] || []).join(",")}/${S.exrVer}/${JSON.stringify(done)}/${JSON.stringify(plan)}/${(S.group.roster || []).map((p) => p.uid).join(",")}/${Object.keys(held).join(",")}`;
 
   // nothing on the page has changed (e.g. a draft came back from the database): only the bar is updated,
   // so the page does not jump and the cursor stays in place
@@ -270,7 +315,7 @@ function renderMain() {
   }
   content.dataset.view = viewKey;
   content.dataset.unit = unit.id;
-  content.innerHTML = `<header class="page-h"><div class="pe">${esc(uLabel(unit))}${meta.group ? ` &middot; ${esc(meta.group)}` : ""} &middot; ${unitNum(unit)}.${secIdx}</div>
+  content.innerHTML = `<header class="page-h"><div class="pe">${esc(uLabel(unit))} &middot; ${unitNum(unit)}.${secIdx}</div>
       <h2>${esc(sec.title)}</h2>${meta.subtitle || sec.subtitle ? `<p class="pl">${esc(meta.subtitle || sec.subtitle)}</p>` : ""}</header>`
     + renderBlocks(sec.blocks, (ex) => {
       const exDone = relEx.includes(ex.id);   // the teacher has checked this exercise
@@ -278,21 +323,29 @@ function renderMain() {
       const fb = fbOn && !res ? S.exr[unit.id]?.feedback?.[ex.id] : null;
       const fbAt = S.exr[unit.id]?.feedbackAt?.[ex.id];
       const isDone = !!done[ex.id];
-      const factor = res ? res.factors?.[ex.id] : exDone ? S.exr[unit.id]?.factors?.[ex.id] : undefined;
       // self-check exercises (Supplementary Exercises): the key comes with the exercise, "Check my answers" shows the result at once
-      const selfRes = ex.self && ex.selfKey && isDone && !res && !exDone ? gradeExercise(ex, sub.answers?.[ex.id] || {}, ex.selfKey).items : undefined;
+      // (the correct answer is shown only in gap fills, multiple choice and matching, never in paraphrases and translations)
+      const selfRes = ex.self && ex.selfKey && isDone && !exDone ? studentItems(ex, gradeExercise(ex, sub.answers?.[ex.id] || {}, ex.selfKey).items) : undefined;
+      // answers typed on this device that had not reached the teacher when the exercise was checked
+      const lost = exDone && !res && held[ex.id];
+      const factor = res ? res.factors?.[ex.id] : exDone ? S.exr[unit.id]?.factors?.[ex.id] : undefined;
       return {
         itemExtra: fb ? (itemId) => feedbackHTML(fb[itemId], { checkedAt: fmtTime(fbAt) }) : null,
         answers: sub.answers?.[ex.id] || {},
+        speech: sub.answers?._speech?.[ex.id],
+        // the classmates for the partner list of a pair discussion (names only, kept by the Teacher's Edition in the group)
+        roster: ex.pair ? (S.group.roster || []).filter((p) => p.uid !== S.user?.uid) : undefined,
         readOnly: readOnly || exDone || isDone,
         headExtra: planTag(plan[ex.id]),
         factor,
         cls: isDone || exDone ? "is-done" : "",
-        after: readOnly || exDone ? "" : doneFootHTML(ex, isDone, sub.answers?.[ex.id]),
-        auto: res ? (isAuto(ex) || hasPick(ex) ? res.auto?.[ex.id] || {} : null) : exDone ? S.exr[unit.id]?.items?.[ex.id] || {} : selfRes,
+        // a pair discussion that the partner recorded: the teacher's check put a copy of the text and the feedback here
+        after: (ex.pair && fb?._pair ? pairFeedbackHTML(fb._pair, { checkedAt: fmtTime(fbAt) }) : "") + (readOnly || exDone ? "" : doneFootHTML(ex, isDone, sub.answers?.[ex.id])),
+        auto: isPractice(ex) ? selfRes : res ? (isAuto(ex) ? studentItems(ex, res.auto?.[ex.id] || {}) : null) : exDone ? studentItems(ex, S.exr[unit.id]?.items?.[ex.id] || {}) : selfRes,
         manual: res?.manual?.[ex.id],
-        showPending: !!res,
-        tag: ex.self && ex.selfKey && !res && !exDone ? "Self-check" : ex.check === "teacher" && !res ? (exDone ? "Checked" : fb ? "Feedback ready – you can correct your text" : "Checked by your teacher") : "",
+        showPending: !!res && !isPractice(ex),
+        before: lost ? `<div class="ub ub-ret" style="margin:18px 0 -8px"><span>Your answers in this exercise had not been saved when your teacher checked it, so they were not checked. They are kept on this device: ask your teacher to open the exercise again.</span></div>` : "",
+        tag: ex.self && ex.selfKey && !exDone ? "Self-check · not marked" : isPractice(ex) && !res ? "Practice · not marked" : ex.check === "teacher" && !res ? (exDone ? "Checked" : fb ? "Feedback ready – you can correct your text" : "Checked by your teacher") : "",
       };
     }, `${unitNum(unit)}.${secIdx}`) + pagerHTML(unit, c, sec);
   renderUnitBar(unit, sub, released, res);
@@ -379,16 +432,15 @@ function renderUnitBar(unit, sub, released, res) {
       ? `<div class="ub ub-ret"><b>Your teacher has returned this work for revision${sub.returnedAt?.toDate ? ` (${fmtTime(sub.returnedAt)})` : ""}.</b>
          ${sub.returnNote ? `<span class="ret-note">${esc(sub.returnNote)}</span>` : ""}<span class="muted">Make your changes and submit ${esc(uLabel(unit))} again.</span></div>` : "";
     const p = doneProgress(unit, sub);
-    html = ret + `<div class="ub"><span id="save-state" class="muted">${sub.dirty ? LOCAL_NOTE : sub.updatedAt ? "Sent to your teacher " + fmtTime(sub.updatedAt) : "Your answers are kept on this device until you click Done"}</span>
+    html = ret + `<div class="ub"><span id="save-state" class="muted">${sub.dirty ? LOCAL_NOTE : sub.updatedAt ? "✓ Saved " + fmtTime(sub.updatedAt) : "Your answers are saved automatically"}</span>
       <span class="ub-done"><b>${p.done} / ${p.total}</b> exercises done</span>
       <button class="btn primary" id="submit-unit" ${p.left.length ? `disabled title="Mark every exercise as Done first"` : ""}>Submit ${esc(uLabel(unit))}</button>
-      ${p.left.length ? `<div class="ub-left">Click <b>Done</b> under each exercise when you finish it. You can submit ${esc(uLabel(unit))} when all of them are done (Supplementary Exercises are optional). Not done yet:
+      ${p.left.length ? `<div class="ub-left">Click <b>Done</b> under each exercise when you finish it. You can submit ${esc(uLabel(unit))} when all of them are done${exercisesOf(S.content[unit.id]).some(isPractice) ? " (Supplementary Exercises are optional practice and are not marked)" : ""}. Not done yet:
         ${p.left.slice(0, 12).map((x) => `<a href="#${esc(unit.id)}/${esc(x.sectionId)}" data-goto-ex="${esc(unit.id)}|${esc(x.sectionId)}|${esc(x.id)}">${esc(x.num)}</a>`).join(" ")}${p.left.length > 12 ? ` <span class="muted">and ${p.left.length - 12} more</span>` : ""}</div>` : ""}</div>`;
   }
   bar.innerHTML = html;
   $("#submit-unit")?.addEventListener("click", () => submitUnit(unit.id));
 }
-
 
 // ------------------------------------------------------------------ answers & autosave
 $("#content").addEventListener("input", onAnswer);
@@ -409,22 +461,58 @@ function onAnswer(e) {
   sub.answers[el.dataset.ex][el.dataset.item] = v;
   sub.dirty = true;
   writeLocal(unitId, sub.answers);
-  // answers stay on this device; they go to the teacher only when the student clicks Done
+  // kept on this device at once, saved in the database after a short pause in typing
   setSaveState(LOCAL_NOTE);
+  scheduleSave(unitId);
   // the "N of M answered" counter under the exercise is updated in place (no re-render)
   const foot = document.querySelector(`[data-foot="${CSS.escape(el.dataset.ex)}"]`);
   const ex = foot && exercisesOf(S.content[unitId]).find((x) => x.id === el.dataset.ex);
   if (ex) foot.textContent = `${(ex.items || []).filter((it) => String(sub.answers[ex.id]?.[it.id] ?? "").trim()).length} of ${(ex.items || []).length} answered`;
 }
 
-function scheduleSave(unitId) {
+function scheduleSave(unitId, delay = SAVE_DELAY) {
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => saveDraft(unitId), SAVE_DELAY);
+  saveTimer = setTimeout(() => saveDraft(unitId).catch(() => {}), delay);
 }
 
-async function saveDraft(unitId, status = "draft") {
+// An exercise the teacher has checked is closed: its answers stay exactly as they were checked.
+// If this browser still has different (unsaved) answers there, the database would refuse to save
+// the whole draft, and nothing typed afterwards would be saved. So the checked answers always win.
+// Answers that never reached the database before the check are not thrown away: they are kept on this device
+// ("held"), and come back by themselves if the teacher opens the exercise again (Hide results), so that they can be checked.
+function lockChecked(unitId) {
+  const sub = S.sub[unitId];
+  if (!sub || S.server[unitId] === undefined) return;
+  const srv = S.server[unitId];
+  sub.answers ??= {};
+  const released = S.group?.releasedEx?.[unitId] || [];
+  const held = readHeld(unitId);
+  let changed = false, restored = false;
+  for (const exId of released) {
+    const mine = sub.answers[exId];
+    if (sub.confirmed && hasText(mine) && !hasText(srv[exId]) && !held[exId]) { held[exId] = structuredClone(mine); changed = true; }
+    if (srv[exId] !== undefined) sub.answers[exId] = structuredClone(srv[exId]);
+    else delete sub.answers[exId];
+  }
+  if (sub.confirmed && sub.status !== "submitted" && !isReleased(unitId)) {
+    for (const exId of Object.keys(held)) {
+      if (released.includes(exId)) continue;
+      if (!hasText(sub.answers[exId])) { sub.answers[exId] = held[exId]; restored = true; }
+      delete held[exId]; changed = true;
+    }
+  }
+  if (changed) writeHeld(unitId, held);
+  if (restored) { sub.dirty = true; writeLocal(unitId, sub.answers); scheduleSave(unitId, 300); }
+}
+const hasText = (m) => !!m && typeof m === "object" && Object.values(m).some((v) => String(v ?? "").trim());
+
+async function saveDraft(unitId, status = "draft", retry = true) {
   const sub = S.sub[unitId];
   if (!sub || (!sub.dirty && status === "draft")) return;
+  if (sub.status === "submitted" || isReleased(unitId)) { sub.dirty = false; return; }
+  // the database has not answered yet (e.g. no connection): the answers are safe on this device, try again soon
+  if (!sub.confirmed) { if (status === "draft") scheduleSave(unitId, 4000); else throw new Error("No connection to the database yet. Please wait a moment and try again."); return; }
+  lockChecked(unitId);
   sub.dirty = false;
   const data = {
     uid: S.user.uid, groupId: S.profile.groupId, unitId,
@@ -442,19 +530,29 @@ async function saveDraft(unitId, status = "draft") {
     sub.updatedAt = new Date();
     sub.status = status;
     if (status === "submitted") sub.submittedAt = new Date();
+    S.server[unitId] = structuredClone(data.answers);
     if (sub.dirty) writeLocal(unitId, sub.answers); else clearLocal(unitId);
-    setSaveState("✓ Sent to your teacher " + fmtTime(new Date()));
+    setSaveState("✓ Saved " + fmtTime(new Date()));
   } catch (e) {
     sub.dirty = true;
+    // the teacher may have just checked an exercise: take the checked answers and try once more
+    if (retry && /permission/i.test(String(e?.code || e?.message))) {
+      lockChecked(unitId);
+      return saveDraft(unitId, status, false);
+    }
     setSaveState("⚠ Not saved: " + friendlyError(e));
     throw e;
   }
 }
 
-async function flushSave() {
+// leaving the page or the unit: the answers are kept on this device at once and sent to the database without waiting
+function flushSave(wait = false) {
   clearTimeout(saveTimer);
   const unitId = $("#content").dataset.unit;
-  if (unitId && S.sub[unitId]?.dirty) writeLocal(unitId, S.sub[unitId].answers);
+  if (!unitId || !S.sub[unitId]?.dirty) return Promise.resolve();
+  writeLocal(unitId, S.sub[unitId].answers);
+  const p = saveDraft(unitId).catch(() => {});
+  return wait ? p : Promise.resolve();
 }
 document.addEventListener("visibilitychange", () => { if (document.hidden) flushSave(); });
 window.addEventListener("pagehide", () => flushSave());
@@ -482,8 +580,8 @@ function doneProgress(unit, sub) {
   const nums = exerciseNumbers(c, unitNum(unit));
   const done = doneMap(sub.answers), checked = S.group?.releasedEx?.[unit.id] || [];
   // Supplementary Exercises are optional: they are not needed to submit the week
-  const grp = (sid) => (unit.sections || []).find((x) => x.id === sid)?.group || "";
-  const all = exercisesOf(c).filter((ex) => !/supplementary/i.test(grp(ex.sectionId))).map((ex) => ({ ...ex, num: nums[ex.id] }));
+  const optional = (ex) => ex.sectionId === "supplementary" || /^supplementary/i.test(ex.sectionTitle || "");
+  const all = exercisesOf(c).filter((ex) => !optional(ex)).map((ex) => ({ ...ex, num: nums[ex.id] }));
   const left = all.filter((ex) => !done[ex.id] && !checked.includes(ex.id));
   return { total: all.length, done: all.length - left.length, left };
 }
@@ -495,6 +593,9 @@ const lsKey = (unitId) => `draft:${S.user?.uid}:${unitId}`;
 function writeLocal(unitId, answers) { try { localStorage.setItem(lsKey(unitId), JSON.stringify({ ts: Date.now(), answers })); } catch {} }
 function readLocal(unitId) { try { return JSON.parse(localStorage.getItem(lsKey(unitId))); } catch { return null; } }
 function clearLocal(unitId) { try { localStorage.removeItem(lsKey(unitId)); } catch {} }
+const heldKey = (unitId) => `held:${S.user?.uid}:${unitId}`;
+function readHeld(unitId) { try { return JSON.parse(localStorage.getItem(heldKey(unitId))) || {}; } catch { return {}; } }
+function writeHeld(unitId, h) { try { Object.keys(h).length ? localStorage.setItem(heldKey(unitId), JSON.stringify(h)) : localStorage.removeItem(heldKey(unitId)); } catch {} }
 
 // ------------------------------------------------------------------ the book cannot be copied or pasted into
 function protectBook() {
@@ -525,6 +626,109 @@ function protectBook() {
     if ((e.ctrlKey || e.metaKey) && (k === "p" || k === "s")) { e.preventDefault(); note("Printing and saving are turned off in this course book."); }
   });
 }
+
+// ------------------------------------------------------------------ My results
+// Everything the teacher has checked, week by week: marks of the checked exercises, the result of a whole week,
+// written feedback that is ready, and the student's own progress (Done, Supplementary Exercises).
+const pct = (a, b) => (b ? Math.round((100 * a) / b) : null);
+function exResult(ex, unitId, res, exr, relEx) {
+  // the whole week has been checked: the result document has every exercise
+  if (res) {
+    const f = res.factors?.[ex.id] ?? 1;
+    if (isAuto(ex)) {
+      const items = Object.values(res.auto?.[ex.id] || {});
+      return { score: r2(items.filter((x) => x.ok).length * f), max: items.length, f };
+    }
+    if (isManual(ex)) {
+      let score = 0, max = 0, pending = 0;
+      for (const it of (ex.items || []).filter((x) => !x.plain)) {
+        max += itemMax(ex, it);
+        const g = res.manual?.[ex.id]?.[it.id];
+        if (g && g.score !== null && g.score !== "" && g.score !== undefined) score += Number(g.score) * f; else pending++;
+      }
+      return { score: r2(score), max, pending, f };
+    }
+  }
+  if (relEx.includes(ex.id) && exr?.scores?.[ex.id]) {
+    const sc = exr.scores[ex.id];
+    return { score: sc.score, max: sc.max, f: exr.factors?.[ex.id] ?? 1 };
+  }
+  return null;
+}
+function renderResults() {
+  const content = $("#content");
+  content.dataset.unit = ""; content.dataset.test = ""; content.dataset.view = "";
+  $("#unit-bar").innerHTML = "";
+  setCrumb(`<b>My results</b>`);
+  document.title = `My results · ${COURSE_TITLE}`;
+  const open = S.units.filter((u) => isOpen(u.id) && u.status !== "soon");
+  open.forEach((u) => ensureUnit(u.id));
+  let sumS = 0, sumM = 0, nChecked = 0;
+  const weeks = [...open].reverse().map((u) => {
+    const c = S.content[u.id], sub = S.sub[u.id];
+    if (c === undefined || !sub) return `<section class="box res-week"><h3>${esc(uLabel(u))} · ${esc(u.title)}</h3><p class="muted">Loading…</p></section>`;
+    if (c === null) return "";
+    const exr = S.exr[u.id], released = isReleased(u.id), res = released ? S.result[u.id] : null;
+    const relEx = S.group.releasedEx?.[u.id] || [], fbEx = S.group.feedbackEx?.[u.id] || [];
+    const nums = exerciseNumbers(c, unitNum(u));
+    const done = doneMap(sub.answers);
+    const all = exercisesOf(c);
+    const req = all.filter((ex) => !isPractice(ex)), supp = all.filter((ex) => isPractice(ex));
+    let wS = 0, wM = 0;
+    const rows = req.map((ex) => {
+      const r = exResult(ex, u.id, res, exr, relEx);
+      const fb = fbEx.includes(ex.id) && exr?.feedback?.[ex.id];
+      const link = `<a href="#${esc(u.id)}/${esc(ex.sectionId)}" data-goto-ex="${esc(u.id)}|${esc(ex.sectionId)}|${esc(ex.id)}">${esc(nums[ex.id] || "")}</a>`;
+      let mark = "", status;
+      if (r && !(r.pending && r.pending === (ex.items || []).filter((x) => !x.plain).length)) {
+        wS += r.score; wM += r.max;
+        const p = pct(r.score, r.max);
+        mark = `<b>${r.score} / ${r.max}</b>${p !== null ? ` <span class="muted">(${p}%)</span>` : ""}${r.f !== 1 ? ` <span class="pill warn" title="You were absent from the lesson where this exercise was done in class">${Math.round(r.f * 100)}% of the points</span>` : ""}${r.pending ? ` <span class="muted">· ${r.pending} still being assessed</span>` : ""}`;
+        status = `<span class="pill on">checked</span>`;
+      } else if (fb) status = `<span class="pill on">feedback ready</span>`;
+      else if (released || relEx.includes(ex.id)) status = `<span class="pill off">${res || relEx.includes(ex.id) ? "being assessed" : "not submitted"}</span>`;
+      else if (done[ex.id]) status = `<span class="pill">done · not checked yet</span>`;
+      else status = hasText(sub.answers?.[ex.id]) ? `<span class="pill warn">started</span>` : `<span class="pill off">not started</span>`;
+      return `<tr><td class="num">${link}</td><td>${esc(ex.title || "")}</td><td>${status}</td><td class="num">${mark}</td></tr>`;
+    }).join("");
+    sumS += wS; sumM += wM; if (wM) nChecked++;
+    // Supplementary Exercises: practice, not marked; the share of correct answers is only for the student
+    let sOk = 0, sMax = 0;
+    const sDone = supp.filter((ex) => done[ex.id]);
+    for (const ex of sDone) if (ex.selfKey && isAuto(ex)) { const g = gradeExercise(ex, sub.answers?.[ex.id] || {}, ex.selfKey); sOk += g.score; sMax += g.max; }
+    const head = res
+      ? `<div class="ub ub-res"><b>Result of the unit: ${res.score} / ${res.max}</b><span>Auto-checked tasks ${res.autoScore}/${res.autoMax}${res.manualMax ? ` · open answers ${res.manualPending ? "being assessed" : res.manualScore + "/" + res.manualMax}` : ""}</span></div>`
+      : released ? `<div class="ub">The unit has been checked, but your work was not submitted.</div>` : "";
+    return `<section class="box res-week"><h3><a href="#${esc(u.id)}">${esc(uLabel(u))} · ${esc(u.title)}</a></h3>${head}
+      <p class="muted" style="margin:6px 0">Done: <b>${req.filter((ex) => done[ex.id] || relEx.includes(ex.id)).length} / ${req.length}</b> exercises${wM ? ` · checked so far: <b>${r2(wS)} / ${wM}</b> (${pct(wS, wM)}%)` : ""}${supp.length ? ` · Supplementary Exercises checked: <b>${sDone.length} / ${supp.length}</b>${sMax ? ` (${pct(sOk, sMax)}% correct, not marked)` : ""}` : ""}</p>
+      <div class="tscroll"><table class="t res-t"><tr><th>No.</th><th>Exercise</th><th>Status</th><th>Mark</th></tr>${rows}</table></div></section>`;
+  }).join("");
+  content.innerHTML = `<header class="page-h"><div class="pe">${esc(COURSE_TITLE)}</div><h2>My results</h2>
+      <p class="pl">Your marks appear here as soon as your teacher checks an exercise. Click the number of an exercise to open it with the corrections.</p></header>
+    ${open.length ? `<div class="cards"><div class="card"><b>${sumM ? `${r2(sumS)} / ${sumM}` : "—"}</b><span>points in the checked exercises${sumM ? ` (${pct(sumS, sumM)}%)` : ""}</span></div>
+      <div class="card"><b>${nChecked}</b><span>${nChecked === 1 ? "unit" : "units"} with checked work</span></div></div>` : ""}
+    ${weeks || `<div class="locked-msg">No units are open yet.</div>`}`;
+}
+
+// ------------------------------------------------------------------ the page is out of date
+// Students often keep a tab open for days. When the course book is updated, the old page keeps running the old code;
+// every few minutes the page asks for the current version and offers to reload.
+const MY_VERSION = new URL(import.meta.url).searchParams.get("v") || "";
+async function checkVersion() {
+  if (!MY_VERSION || document.hidden || document.querySelector(".upd-bar")) return;
+  try {
+    const html = await (await fetch(`index.html?nocache=${Date.now()}`, { cache: "no-store" })).text();
+    const v = html.match(/student\.js\?v=([\w-]+)/)?.[1];
+    if (!v || v === MY_VERSION) return;
+    const el = document.createElement("div");
+    el.className = "upd-bar";
+    el.innerHTML = `<span>The course book has been updated.</span><button class="btn small primary" type="button">Reload the page</button>`;
+    el.querySelector("button").addEventListener("click", async () => { await flushSave(true); location.reload(); });
+    document.body.appendChild(el);
+  } catch {}
+}
+setInterval(checkVersion, 5 * 60 * 1000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) checkVersion(); });
 
 // ------------------------------------------------------------------ timed tests
 function visibleTests() {

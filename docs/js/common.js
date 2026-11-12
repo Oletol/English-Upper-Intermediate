@@ -1,5 +1,6 @@
 // Общие функции: отрисовка упражнений, автопроверка, подсчёт баллов.
 // Используются и студенческой, и преподавательской страницей.
+import { metricsLine } from "./transcribe.js?v=20261112u";
 
 export const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -54,6 +55,8 @@ export const KIND_LABEL = { gap: "Gap fill", match: "Matching", mcq: "Multiple c
 export const isAuto = (ex) => ex.kind !== "open" && ex.graded !== false;
 // marked by the teacher by hand
 export const isManual = (ex) => ex.kind === "open" && ex.graded !== false;
+// practice only (Supplementary Exercises): never counted in the score of the week
+export const isPractice = (ex) => !!(ex?.practice || ex?.self);
 // checked by the teacher separately, exercise by exercise ("check": "teacher")
 export const isTeacherChecked = (ex) => isAuto(ex) && ex.check === "teacher";
 const NOAUTO = `autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"`;
@@ -78,37 +81,8 @@ export function itemMax(ex, item) {
 }
 
 export function keyText(key) {
-  return Array.isArray(key) ? key.map((x) => (Array.isArray(x) ? x.join(" ~ ") : String(x).replace(/^\?(.*)$/, "($1)"))).join(" / ") : String(key ?? "");
+  return Array.isArray(key) ? key.join(" / ") : String(key ?? "");
 }
-
-// "multi" exercises: the student gives every possible variant, e.g. "would take / used to take".
-// The key is a list of parts; "a ~ b" = accepted spellings of one part; "?part" = may be added, not required.
-// (No lists inside lists: Firestore does not store nested arrays.)
-const MULTI_SPLIT = /\s*(?:\/|;|,|\||\bor\b)\s*/;
-const partsOf = (key) => (Array.isArray(key) ? key : [key]).map((p) => {
-  const alts = (Array.isArray(p) ? p : [p]).flatMap((a) => String(a).split(/\s+~\s+/));   // "a ~ b": two spellings of one variant
-  const opt = alts.some((a) => String(a).startsWith("?"));
-  return { opt, alts: alts.map((a) => String(a).replace(/^\?/, "")) };
-});
-function isCorrectMulti(given, key) {
-  const gs = String(given ?? "").split(MULTI_SPLIT).map((x) => x.trim()).filter(Boolean);
-  if (!gs.length) return false;
-  const parts = partsOf(key), hit = new Set();
-  for (const g of gs) {
-    const i = parts.findIndex((p) => p.alts.some((a) => isCorrect(g, a)));
-    if (i < 0 || hit.has(i)) return false;
-    hit.add(i);
-  }
-  return parts.every((p, i) => p.opt || hit.has(i));
-}
-// the answer shown to the student: the required parts, first spelling of each
-export const multiShow = (key) => { const ps = partsOf(key); const req = ps.filter((p) => !p.opt); return (req.length ? req : ps.slice(0, 1)).map((p) => firstKey(p.alts[0])).join(" / "); };
-export const shownKey = (ex, key, it) => (it?.choices ? String((Array.isArray(key) ? key[0] : key) ?? "") : ex?.multi ? multiShow(key) : firstKey(key));
-// exercise number: her own number ("3", "A1", "R2") if given, otherwise the automatic one
-export const exNum = (ex, auto) => (ex?.no ? String(ex.no) : auto);
-// open items with a dropdown next to the answer (e.g. the type of a since-sentence): auto-checked part
-export const PICK = "-type";
-export const hasPick = (ex) => ex.kind === "open" && (ex.items || []).some((it) => it.choices);
 
 // the answer shown to the student after checking: the first accepted variant
 export const firstKey = (key) => expandKey(Array.isArray(key) ? key[0] ?? "" : key ?? "")[0].replace(/\s+/g, " ").trim();
@@ -120,7 +94,6 @@ export function isCorrect(given, key, opts = {}) {
     return g !== "" && (Array.isArray(key) ? key : [key]).some((k) => String(k ?? "").trim() === g);
   }
   if (given == null || norm(given) === "") return false;
-  if (opts.multi) return isCorrectMulti(given, key);
   const P = !!opts.punct;
   const variants = (Array.isArray(key) ? key : [key]).flatMap(expandKey);
   // "'d" can mean "had" or "would": try both, in the answer and in the key
@@ -139,15 +112,13 @@ export function gradeAuto(content, answers, keys) {
   const items = {};
   let score = 0, max = 0;
   for (const ex of exercisesOf(content)) {
-    if (!isAuto(ex) && !hasPick(ex)) continue;
+    if (!isAuto(ex) || isPractice(ex)) continue;
     items[ex.id] = {};
     for (const it of ex.items || []) {
-      if (!isAuto(ex) && !it.choices) continue;
-      const id = isAuto(ex) ? it.id : it.id + PICK;
-      const given = answers?.[ex.id]?.[id] ?? "";
-      const key = keys?.[ex.id]?.[id];
-      const ok = isCorrect(given, key, { punct: ex.punct, multi: ex.multi && isAuto(ex), choice: !!it.choices });
-      items[ex.id][id] = { given, ok, correct: isAuto(ex) ? shownKey(ex, key, it) : shownKey({}, key, it) };
+      const given = answers?.[ex.id]?.[it.id] ?? "";
+      const key = keys?.[ex.id]?.[it.id];
+      const ok = isCorrect(given, key, { punct: ex.punct, choice: !!it.choices });
+      items[ex.id][it.id] = { given, ok, correct: firstKey(key) };
       max += 1;
       if (ok) score += 1;
     }
@@ -162,8 +133,8 @@ export function gradeExercise(ex, answers, keys) {
   for (const it of ex.items || []) {
     const given = answers?.[it.id] ?? "";
     const key = keys?.[it.id];
-    const ok = isCorrect(given, key, { punct: ex.punct, multi: ex.multi, choice: !!it.choices });
-    items[it.id] = { given, ok, correct: shownKey(ex, key, it) };
+    const ok = isCorrect(given, key, { punct: ex.punct, choice: !!it.choices });
+    items[it.id] = { given, ok, correct: firstKey(key) };
     if (ok) score += 1;
   }
   return { items, score, max: (ex.items || []).length };
@@ -175,15 +146,16 @@ export function gradeExercise(ex, answers, keys) {
 export const r2 = (x) => Math.round(x * 100) / 100;
 export function buildResult({ sub, content, keys, manual = {}, showCorrect = true, factors = {} }) {
   const auto = gradeAuto(content, sub.answers, keys);
-  if (!showCorrect)
-    for (const ex of Object.values(auto.items)) for (const r of Object.values(ex)) delete r.correct;
+  // the correct answers go to the students only when the teacher allows it, and never for translations and paraphrases
+  for (const ex of exercisesOf(content))
+    if (auto.items[ex.id]) auto.items[ex.id] = studentItems(ex, auto.items[ex.id], showCorrect);
   let aScore = 0;
   for (const [exId, items] of Object.entries(auto.items))
     aScore += Object.values(items).filter((r) => r.ok).length * (factors[exId] ?? 1);
   let mScore = 0, mMax = 0, pending = 0;
   for (const ex of exercisesOf(content)) {
-    if (!isManual(ex)) continue;
-    for (const it of ex.items || []) {
+    if (!isManual(ex) || isPractice(ex)) continue;
+    for (const it of (ex.items || []).filter((x) => !x.plain)) {   // "plain": an extra line (a partner's name) that gets no points
       mMax += itemMax(ex, it);
       const g = manual?.[ex.id]?.[it.id];
       if (g && g.score !== null && g.score !== "" && g.score !== undefined) mScore += Number(g.score) * (factors[ex.id] ?? 1);
@@ -211,13 +183,32 @@ export const doneMap = (answers) => (answers && typeof answers[DONE] === "object
 // translation exercises are left out of the live statistics
 export const isTranslation = (ex) => ex.stats === false || /translat/i.test(`${ex.title || ""} ${ex.rubric || ""}`.replace(/<[^>]*>/g, ""));
 
+// ------------------------------------------------------------------ which keys the students may see
+// Exercises where the student writes or rewrites a whole sentence (translations, paraphrases, transformations,
+// open answers) never send a model answer to the students: there are many good answers, and one model answer
+// would be taken as the only right one. Gap fills, multiple choice and matching may show the correct answer.
+// "showKey": true or false in course.json decides for one exercise.
+const REWRITE = /translat|paraphras|rephras|re-?writ|reword|transform|mean(s|ing)? the same|second sentence|in other words/i;
+export const isRewrite = (ex) => ex?.kind === "open" || isTranslation(ex || {}) || REWRITE.test(`${ex?.title || ""} ${ex?.rubric || ""}`.replace(/<[^>]*>/g, ""));
+export function keyForStudents(ex) {
+  if (ex?.showKey === true) return true;
+  if (ex?.showKey === false) return false;
+  return ["gap", "mcq", "match"].includes(ex?.kind) && !isRewrite(ex);
+}
+// remove the correct answers from a checked exercise ({itemId: {given, ok, correct}}) when the students may not see them
+export function studentItems(ex, items, showCorrect = true) {
+  if (!items || (showCorrect && keyForStudents(ex))) return items;
+  // written as "" (not deleted): exerciseResults are saved with merge, so a key from an earlier check would otherwise stay
+  return Object.fromEntries(Object.entries(items).map(([id, r]) => [id, { ...(r || {}), correct: "" }]));
+}
+
 // numbers of the exercises as the book shows them: {exId: "1.4.2"}
 export function exerciseNumbers(content, unitN) {
   const out = {};
   (content?.sections || []).forEach((s, i) => {
     let n = 0;
     for (const b of s.blocks || []) {
-      if (b.type === "exercise") { n += 1; out[b.id] = exNum(b, `${unitN}.${i + 1}.${n}`); }
+      if (b.type === "exercise") { n += 1; out[b.id] = `${unitN}.${i + 1}.${n}`; }
       else if (b.type === "flashcards" && b.numbered) n += 1;
     }
   });
@@ -258,7 +249,7 @@ export function renderBlocks(blocks, exOpts, numPrefix = "") {
     if (b.type === "audio") return renderAudio(b);
     if (b.type === "video") return renderVideo(b);
     if (b.type === "speaking") return `<div class="block-spk">${speakingHTML(b, "blk-" + (b.id || hashStr(JSON.stringify(b))))}</div>`;
-    if (b.type === "exercise") { n += 1; return renderExercise(b, { num: exNum(b, numPrefix ? `${numPrefix}.${n}` : String(n)), ...exOpts(b) }); }
+    if (b.type === "exercise") { n += 1; return renderExercise(b, { num: numPrefix ? `${numPrefix}.${n}` : String(n), ...exOpts(b) }); }
     return "";
   }).join("\n");
 }
@@ -287,23 +278,28 @@ export function renderExercise(ex, o = {}) {
     const mark = r ? (r.ok ? "ok" : "bad") : "";
     const attrs = `data-ex="${esc(ex.id)}" data-item="${esc(it.id)}" ${dis}`;
     const corr = r && !r.ok && r.correct ? `<span class="corr">Correct: ${esc(showAns(ex, r.correct))}</span>` : "";
-    const keyHint = o.key && o.key[it.id] !== undefined && ex.kind !== "open" ? `<span class="keyhint">✓ ${esc(showAns(ex, keyText(o.key[it.id])))}</span>` : "";
+    const keyHint = o.key && o.key[it.id] !== undefined ? `<span class="keyhint">✓ ${esc(showAns(ex, keyText(o.key[it.id])))}</span>` : "";
     let body = "";
     const play = it.audio ? itemPlayButton(it.audio, ex.once) : "";
 
     if (ex.kind === "gap") {
       const size = it.size || ex.size || 14;
       // "choices": the word is chosen from a dropdown list instead of being typed
+      // Teacher's Edition (key shown): the dropdown stays open for viewing the choices, the key is preselected; nothing is saved
+      const keyMode = !!(o.key && o.key[it.id] !== undefined && it.choices && (!o.answers || (o.practice && val === "")));
+      const kv = keyMode ? firstKey(o.key[it.id]) : val;
       const input = it.choices
-        ? `<select class="gap ${mark}" ${attrs}><option value="">${esc(ex.ph || "choose…")}</option>${it.choices.map((c) => `<option value="${esc(c)}" ${val === c ? "selected" : ""}>${esc(c)}</option>`).join("")}</select>`
+        ? `<select class="gap ${mark} ${keyMode ? "key-sel" : ""}" ${keyMode ? `data-ex="${esc(ex.id)}" data-item="${esc(it.id)}" title="The choices the student sees; the key is selected"` : attrs}><option value="">${esc(ex.ph || "choose…")}</option>${it.choices.map((c) => `<option value="${esc(c)}" ${kv === c ? "selected" : ""}>${esc(c)}</option>`).join("")}</select>`
         : `<input class="gap ${ex.box ? "box" : ""} ${mark}" ${attrs} value="${esc(val)}" size="${size}" ${ex.box ? `style="width:${size + 1}ch"` : ""} ${NOAUTO}>`;
       if (ex.inline) { inlineCtl[it.id] = `${ex.inlineNums === false ? "" : `<span class="gn">${esc(it.id)}</span>`}${input}${corr}${keyHint}${stat(it.id)}`; return ""; }
       body = (it.text || "").includes("___") ? it.text.replace("___", input) : `<span class="li-t">${it.text || ""}</span>${input}`;
       body += corr + keyHint + stat(it.id);
     } else if (ex.kind === "match") {
+      const keyM = !!(o.key && o.key[it.id] !== undefined && (!o.answers || (o.practice && val === "")));
+      const mv = keyM ? firstKey(o.key[it.id]) : val;
       const opts = (ex.options || []).map((op) =>
-        `<option value="${esc(op.id)}" ${val === op.id ? "selected" : ""}>${ex.plain ? "" : esc(op.id) + ". "}${esc(stripTags(op.text))}</option>`).join("");
-      body = `<span class="m-word">${it.text}</span> <select class="gap ${mark}" ${attrs}><option value="">choose…</option>${opts}</select>${corr}${keyHint}${stat(it.id)}`;
+        `<option value="${esc(op.id)}" ${mv === op.id ? "selected" : ""}>${ex.plain ? "" : esc(op.id) + ". "}${esc(stripTags(op.text))}</option>`).join("");
+      body = `<span class="m-word">${it.text}</span> <select class="gap ${mark} ${keyM ? "key-sel" : ""}" ${keyM ? `data-ex="${esc(ex.id)}" data-item="${esc(it.id)}"` : attrs}><option value="">choose…</option>${opts}</select>${corr}${keyHint}${stat(it.id)}`;
     } else if (ex.kind === "mcq") {
       const name = `${ex.id}__${it.id}`;
       const letters = "ABCDEFGH";
@@ -317,7 +313,7 @@ export function renderExercise(ex, o = {}) {
       const m = o.manual?.[it.id];
       const max = itemMax(ex, it);
       let grade = "";
-      if (o.grading) {
+      if (o.grading && !it.plain) {
         grade = `<div class="grade-box">
           <label>Score <input type="number" min="0" max="${max}" step="0.5" class="g-score" data-ex="${esc(ex.id)}" data-item="${esc(it.id)}" value="${esc(m?.score ?? "")}"> / ${max}</label>
           <textarea class="g-comment" rows="2" placeholder="Comment for the student" data-ex="${esc(ex.id)}" data-item="${esc(it.id)}">${esc(m?.comment ?? "")}</textarea>
@@ -331,14 +327,21 @@ export function renderExercise(ex, o = {}) {
       const wc = minW ? `<div class="wc"><span class="wc-n" data-wc="${esc(ex.id)}:${esc(it.id)}">${countWords(val)}</span> words <span class="muted">· at least ${minW}</span></div>` : "";
       const model = o.key && o.key[it.id] ? `<div class="keyhint model"><b>Model answer:</b> ${esc(keyText(o.key[it.id]))}</div>` : "";
       const src = it.zh ? `<span class="src-ru">${it.text}</span><span class="src-zh" lang="zh-Hans">${esc(it.zh)}</span>` : it.text;
-      let pick = "";
-      if (it.choices) {
-        const pid = it.id + PICK, pv = a[pid] ?? "", pr = o.auto?.[pid];
-        const pm = pr ? (pr.ok ? "ok" : "bad") : "";
-        const pk = o.key && o.key[pid] !== undefined ? `<span class="keyhint">✓ ${esc(keyText(o.key[pid]))}</span>` : "";
-        pick = `<div class="pick"><span class="pick-l">${esc(it.pickLabel || ex.pickLabel || "Type")}:</span><select class="gap ${pm}" data-ex="${esc(ex.id)}" data-item="${esc(pid)}" ${dis}><option value="">choose…</option>${it.choices.map((c) => `<option value="${esc(c)}" ${pv === c ? "selected" : ""}>${esc(c)}</option>`).join("")}</select>${pr && !pr.ok && pr.correct ? `<span class="corr">Correct: ${esc(pr.correct)}</span>` : ""}${pk}</div>`;
+      // "transcript": the text is written by the speech recogniser (speaking block with "transcribe"), not typed
+      const tr = ex.transcript && it === ex.items[0];
+      let spLine = "";
+      if (tr) { try { spLine = o.speech ? metricsLine(JSON.parse(o.speech)) : ""; } catch {} }
+      const extra = tr ? `<input type="hidden" data-ex="_speech" data-item="${esc(ex.id)}" value="${esc(o.speech || "")}" ${dis}><div class="sp-line" data-sp-line="${esc(ex.id)}">${esc(spLine)}</div>` : "";
+      const ph = o.readOnly ? "" : tr ? "Record your answer above and click Transcribe: the text will appear here." : "Type your answer here…";
+      // the partner in a pair discussion: chosen from the students of the group (the value is the student's id)
+      if (ex.pair && it.plain && Array.isArray(o.roster)) {
+        const known = o.roster.some((p) => p.uid === val);
+        const optsP = o.roster.map((p) => `<option value="${esc(p.uid)}" ${p.uid === val ? "selected" : ""}>${esc(p.name)}</option>`).join("");
+        body = `${it.text}<select class="gap partner-sel" ${attrs}><option value="">choose your partner…</option>${optsP}`
+          + `${val && !known ? `<option value="${esc(val)}" selected>${esc(val)}</option>` : ""}</select>${o.itemExtra ? o.itemExtra(it.id) : ""}`;
+        return `<li>${body}</li>`;
       }
-      body = `${src}${pick}${model}<textarea class="open-answer" rows="${it.rows || 5}" ${attrs} ${NOAUTO} placeholder="${o.readOnly ? "" : "Type your answer here…"}">${esc(val)}</textarea>${wc}${o.itemExtra ? o.itemExtra(it.id) : ""}${grade}`;
+      body = `${src}${model}<textarea class="open-answer ${tr ? "transcript" : ""}" rows="${it.rows || 5}" ${attrs} ${tr ? "readonly" : ""} ${NOAUTO} placeholder="${ph}">${esc(val)}</textarea>${extra}${wc}${o.itemExtra ? o.itemExtra(it.id) : ""}${grade}`;
     }
     return `<li${play ? ' class="has-play"' : ""}>${play}${play ? `<div class="li-body">${body}</div>` : body}</li>`;
   }).join("\n");
